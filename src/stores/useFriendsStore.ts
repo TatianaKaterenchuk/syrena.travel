@@ -19,7 +19,7 @@ interface FriendsState {
 interface FriendsActions {
   fetchFriends: (userId: string) => Promise<void>;
   sendRequest: (fromUid: string, fromName: string, fromPhoto: string, toUid: string, toName: string) => Promise<void>;
-  acceptRequest: (requestId: string, request: FriendRequest) => Promise<void>;
+  acceptRequest: (requestId: string, request: FriendRequest, acceptorName?: string, acceptorPhoto?: string) => Promise<void>;
   rejectRequest: (requestId: string) => Promise<void>;
   removeFriend: (friendDocId: string) => Promise<void>;
   getMutualFriends: (otherUserId: string) => Promise<Friend[]>;
@@ -110,18 +110,25 @@ export const useFriendsStore = create<FriendsState & FriendsActions>((set, get) 
     }
   },
 
-  acceptRequest: async (requestId, request) => {
+  acceptRequest: async (requestId, request, acceptorName?: string, acceptorPhoto?: string) => {
     try {
-      // Check if already friends to prevent duplicates
-      const existingFriends = await getDocuments<Friend>('friends', [
-        where('userId', '==', request.toUid),
-        where('uid', '==', request.fromUid),
+      // Check if already friends to prevent duplicates (check both directions)
+      const [existingForAcceptor, existingForSender] = await Promise.all([
+        getDocuments<Friend>('friends', [
+          where('userId', '==', request.toUid),
+          where('uid', '==', request.fromUid),
+        ]),
+        getDocuments<Friend>('friends', [
+          where('userId', '==', request.fromUid),
+          where('uid', '==', request.toUid),
+        ]),
       ]);
 
       await updateDocument('friendRequests', requestId, { status: 'accepted' });
 
-      if (existingFriends.length === 0) {
-        const friendData = {
+      // Create friend doc for the ACCEPTOR (so they see the sender in their list)
+      if (existingForAcceptor.length === 0) {
+        const friendDataForAcceptor = {
           uid: request.fromUid,
           displayName: request.fromName,
           username: request.fromName.toLowerCase().replace(/\s+/g, ''),
@@ -129,16 +136,28 @@ export const useFriendsStore = create<FriendsState & FriendsActions>((set, get) 
           status: 'accepted' as const,
           userId: request.toUid,
         };
-        await createDocument('friends', friendData);
+        await createDocument('friends', friendDataForAcceptor);
         set((state) => ({
-          friends: [...state.friends, { ...friendData, addedAt: Timestamp.fromMillis(Date.now()) } as Friend],
+          friends: [...state.friends, { ...friendDataForAcceptor, addedAt: Timestamp.fromMillis(Date.now()) } as Friend],
           requests: state.requests.filter((r) => r.id !== requestId),
         }));
       } else {
-        // Already friends, just remove the request from UI
         set((state) => ({
           requests: state.requests.filter((r) => r.id !== requestId),
         }));
+      }
+
+      // Create friend doc for the SENDER (so they see the acceptor in their list)
+      if (existingForSender.length === 0) {
+        const friendDataForSender = {
+          uid: request.toUid,
+          displayName: acceptorName || 'Friend',
+          username: (acceptorName || 'friend').toLowerCase().replace(/\s+/g, ''),
+          photoURL: acceptorPhoto || '',
+          status: 'accepted' as const,
+          userId: request.fromUid,
+        };
+        await createDocument('friends', friendDataForSender);
       }
     } catch (error) {
       console.error('Error accepting friend request:', error);

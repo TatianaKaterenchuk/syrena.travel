@@ -139,7 +139,7 @@ export default function FriendsScreen() {
   const handleAccept = async (request: FriendRequest) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     try {
-      await acceptRequest(request.id, request);
+      await acceptRequest(request.id, request, profile?.displayName, profile?.photoURL);
       if (user?.uid) fetchFriends(user.uid);
     } catch (error) {
       Alert.alert('Error', 'Could not accept request.');
