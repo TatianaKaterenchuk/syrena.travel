@@ -340,7 +340,10 @@ export default function ExploreScreen() {
               >
                 <View style={styles.featuredBrassTop} />
                 <View style={styles.featuredContent}>
-                  <View style={styles.featuredLeft}>
+                  <Pressable
+                    style={styles.featuredLeft}
+                    onPress={() => router.push(`/modal/user-profile?id=${featuredPerson.uid}`)}
+                  >
                     <View style={styles.featuredAvatarRing}>
                       <Image
                         source={{ uri: featuredPerson.photoURL || 'https://i.pravatar.cc/100?img=8' }}
@@ -350,15 +353,18 @@ export default function ExploreScreen() {
                     <View style={styles.featuredCrown}>
                       <Ionicons name="trophy" size={10} color={colors.gold.primary} />
                     </View>
-                  </View>
-                  <View style={styles.featuredInfo}>
+                  </Pressable>
+                  <Pressable
+                    style={styles.featuredInfo}
+                    onPress={() => router.push(`/modal/user-profile?id=${featuredPerson.uid}`)}
+                  >
                     <Text style={styles.featuredLabel}>PERSON OF THE MONTH</Text>
                     <Text style={styles.featuredName}>{featuredPerson.displayName}</Text>
                     <Text style={styles.featuredUsername}>@{featuredPerson.username}</Text>
                     <Text style={styles.featuredHeadline} numberOfLines={featuredExpanded ? undefined : 2}>
                       {featuredPerson.headline}
                     </Text>
-                  </View>
+                  </Pressable>
                 </View>
                 {/* Expanded bio section */}
                 {featuredExpanded && featuredPerson.bio ? (

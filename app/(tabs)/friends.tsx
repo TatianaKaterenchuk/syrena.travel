@@ -89,12 +89,43 @@ export default function FriendsScreen() {
     }
   }, [searchQuery, handleSearch]);
 
+  const [suggestions, setSuggestions] = useState<UserProfile[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
   const [mutualFriendsMap, setMutualFriendsMap] = useState<Record<string, Friend[]>>({});
   const { getMutualFriends } = useFriendsStore();
 
-  // Fetch mutual friends for search results
+  // Fetch suggestions when search panel opens
   useEffect(() => {
-    if (searchResults.length === 0) {
+    if (!showSearch || !user?.uid) return;
+    if (suggestions.length > 0) return; // already loaded
+    let cancelled = false;
+    (async () => {
+      setLoadingSuggestions(true);
+      try {
+        const allUsers = await getDocuments<UserProfile>('users', []);
+        const friendUids = new Set(friends.map((f) => f.uid));
+        const pendingUids = new Set(sentRequests.map((r) => r.toUid));
+        const suggested = allUsers.filter(
+          (u) =>
+            (u.uid || (u as any).id) !== user.uid &&
+            !friendUids.has(u.uid || (u as any).id) &&
+            !pendingUids.has(u.uid || (u as any).id) &&
+            u.status === 'approved',
+        );
+        if (!cancelled) setSuggestions(suggested.slice(0, 8));
+      } catch (error) {
+        console.error('Error fetching suggestions:', error);
+      } finally {
+        if (!cancelled) setLoadingSuggestions(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [showSearch, user?.uid]);
+
+  // Fetch mutual friends for search results and suggestions
+  const usersForMutual = searchResults.length > 0 ? searchResults : suggestions;
+  useEffect(() => {
+    if (usersForMutual.length === 0) {
       setMutualFriendsMap({});
       return;
     }
@@ -102,17 +133,18 @@ export default function FriendsScreen() {
     (async () => {
       const map: Record<string, Friend[]> = {};
       await Promise.all(
-        searchResults.map(async (u) => {
-          if (!isFriend(u.uid)) {
-            const mutual = await getMutualFriends(u.uid);
-            if (!cancelled) map[u.uid] = mutual;
+        usersForMutual.map(async (u) => {
+          const uid = u.uid || (u as any).id;
+          if (!isFriend(uid)) {
+            const mutual = await getMutualFriends(uid);
+            if (!cancelled) map[uid] = mutual;
           }
         }),
       );
       if (!cancelled) setMutualFriendsMap(map);
     })();
     return () => { cancelled = true; };
-  }, [searchResults]);
+  }, [usersForMutual]);
 
   const isFriend = (uid: string) => friends.some((f) => f.uid === uid);
   const hasPendingRequest = (uid: string) =>
@@ -187,7 +219,7 @@ export default function FriendsScreen() {
       <View style={styles.userRow}>
         <Pressable
           style={styles.userRowClickable}
-          onPress={() => router.push(`/modal/user-profile?id=${item.uid}`)}
+          onPress={() => router.push(`/modal/user-profile?id=${item.uid || (item as any).id}`)}
         >
           {item.photoURL ? (
             <Image source={{ uri: item.photoURL }} style={styles.avatar} />
@@ -364,13 +396,23 @@ export default function FriendsScreen() {
             <View style={styles.searchEmpty}>
               <Text style={styles.searchEmptyText}>No users found</Text>
             </View>
-          ) : (
-            <View style={styles.searchEmpty}>
-              <Text style={styles.searchEmptyText}>
-                Type at least 2 characters to search
-              </Text>
+          ) : suggestions.length > 0 ? (
+            <>
+              <Text style={styles.suggestionsLabel}>SUGGESTED</Text>
+              <FlatList
+                data={suggestions}
+                keyExtractor={(item) => item.uid || (item as any).id}
+                renderItem={renderSearchResult}
+                keyboardShouldPersistTaps="handled"
+                style={styles.searchResultsList}
+                ItemSeparatorComponent={() => <View style={styles.separator} />}
+              />
+            </>
+          ) : loadingSuggestions ? (
+            <View style={styles.searchLoading}>
+              <ActivityIndicator size="small" color={colors.gold.primary} />
             </View>
-          )}
+          ) : null}
         </View>
       )}
 
@@ -591,6 +633,15 @@ const styles = StyleSheet.create({
   },
   searchResultsList: {
     maxHeight: 300,
+  },
+  suggestionsLabel: {
+    fontFamily: fonts.sans.semiBold,
+    fontSize: 10,
+    color: colors.text.tertiary,
+    letterSpacing: 2,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
   },
   searchEmpty: {
     alignItems: 'center',

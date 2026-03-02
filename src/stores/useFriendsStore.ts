@@ -75,8 +75,8 @@ export const useFriendsStore = create<FriendsState & FriendsActions>((set, get) 
       ]);
 
       const allExisting = [...outgoing, ...incoming];
-      if (allExisting.some((r) => r.status === 'pending' || r.status === 'accepted')) {
-        return; // Request already exists
+      if (allExisting.some((r) => r.status === 'pending')) {
+        return; // Pending request already exists
       }
 
       // Also check if already friends
@@ -180,19 +180,51 @@ export const useFriendsStore = create<FriendsState & FriendsActions>((set, get) 
   removeFriend: async (friendUid) => {
     try {
       const { friends } = get();
-      // The friend object has an `id` field added by getDocuments (Firestore doc ID)
       const friendObj = friends.find((f) => f.uid === friendUid) as any;
+      const myUid = friendObj?.userId || (friends[0] as any)?.userId;
+
+      // Delete MY friend doc (so I no longer see them)
       if (friendObj?.id) {
         await deleteDocument('friends', friendObj.id);
       } else {
-        // Fallback: query Firestore for the friend doc
         const docs = await getDocuments<Friend>('friends', [
           where('uid', '==', friendUid),
         ]);
-        for (const doc of docs) {
-          await deleteDocument('friends', (doc as any).id);
+        for (const d of docs) {
+          await deleteDocument('friends', (d as any).id);
         }
       }
+
+      // Delete THEIR friend doc (so they no longer see me)
+      if (myUid) {
+        const theirDocs = await getDocuments<Friend>('friends', [
+          where('userId', '==', friendUid),
+          where('uid', '==', myUid),
+        ]);
+        for (const d of theirDocs) {
+          await deleteDocument('friends', (d as any).id);
+        }
+      }
+
+      // Clean up old friend requests between us so re-friending works
+      if (myUid) {
+        const [reqA, reqB] = await Promise.all([
+          getDocuments<FriendRequest>('friendRequests', [
+            where('fromUid', '==', myUid),
+            where('toUid', '==', friendUid),
+          ]),
+          getDocuments<FriendRequest>('friendRequests', [
+            where('fromUid', '==', friendUid),
+            where('toUid', '==', myUid),
+          ]),
+        ]);
+        for (const r of [...reqA, ...reqB]) {
+          if (r.status === 'accepted') {
+            await deleteDocument('friendRequests', (r as any).id || r.id);
+          }
+        }
+      }
+
       set((state) => ({
         friends: state.friends.filter((f) => f.uid !== friendUid),
       }));
