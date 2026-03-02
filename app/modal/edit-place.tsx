@@ -1,0 +1,688 @@
+import React, { useState, useMemo } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TextInput,
+  Pressable,
+  ScrollView,
+  Alert,
+  ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
+} from 'react-native';
+import { useRouter, useLocalSearchParams } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, fonts, spacing, radius } from '../../src/theme';
+import {
+  PlaceCategory,
+  BudgetTier,
+  BUDGET_LABELS,
+  BUDGET_ICONS,
+  PlaceEditableFields,
+} from '../../src/types';
+import { usePlacesStore } from '../../src/stores/usePlacesStore';
+import { useAuthStore } from '../../src/stores/useAuthStore';
+import { generateTags } from '../../src/utils/generateTags';
+
+// ---------------------------------------------------------------------------
+// Constants (same as add-place.tsx)
+// ---------------------------------------------------------------------------
+
+const CATEGORIES: { key: PlaceCategory; label: string; emoji: string }[] = [
+  { key: 'restaurant', label: 'Restaurant', emoji: '🍽️' },
+  { key: 'hotel', label: 'Hotel', emoji: '🏨' },
+  { key: 'bar', label: 'Bar', emoji: '🍸' },
+  { key: 'nature', label: 'Nature', emoji: '🌿' },
+  { key: 'culture', label: 'Culture', emoji: '🏛️' },
+  { key: 'shopping', label: 'Shopping', emoji: '🛍️' },
+  { key: 'services', label: 'Services', emoji: '🔧' },
+];
+
+const BUDGET_TIERS: { key: BudgetTier; label: string; icon: string }[] = [
+  { key: 1, label: BUDGET_LABELS[1], icon: BUDGET_ICONS[1] },
+  { key: 2, label: BUDGET_LABELS[2], icon: BUDGET_ICONS[2] },
+  { key: 3, label: BUDGET_LABELS[3], icon: BUDGET_ICONS[3] },
+  { key: 4, label: BUDGET_LABELS[4], icon: BUDGET_ICONS[4] },
+];
+
+// ---------------------------------------------------------------------------
+// Component
+// ---------------------------------------------------------------------------
+
+export default function EditPlaceModal() {
+  const router = useRouter();
+  const insets = useSafeAreaInsets();
+  const { id, mode } = useLocalSearchParams<{ id: string; mode: 'edit' | 'suggest' }>();
+
+  const user = useAuthStore((s) => s.user);
+  const profile = useAuthStore((s) => s.profile);
+  const { places, updatePlace, submitEditSuggestion } = usePlacesStore();
+
+  const place = useMemo(() => places.find((p) => p.id === id), [places, id]);
+
+  // Form state — pre-filled from existing place
+  const [name, setName] = useState(place?.name ?? '');
+  const [description, setDescription] = useState(place?.description ?? '');
+  const [selectedCategory, setSelectedCategory] = useState<PlaceCategory>(
+    place?.category ?? 'restaurant',
+  );
+  const [subcategory, setSubcategory] = useState(place?.subcategory ?? '');
+  const [address, setAddress] = useState(place?.address ?? '');
+  const [city, setCity] = useState(place?.city ?? '');
+  const [country, setCountry] = useState(place?.country ?? '');
+  const [selectedBudget, setSelectedBudget] = useState<BudgetTier | null>(
+    place?.budgetTier ?? null,
+  );
+  const [manualTagInput, setManualTagInput] = useState('');
+  const [manualTags, setManualTags] = useState<string[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
+
+  const isEditMode = mode === 'edit';
+  const title = isEditMode ? 'Edit Place' : 'Suggest Edit';
+
+  // Compute diff between current form and original place
+  const computeChanges = (): {
+    changes: PlaceEditableFields;
+    original: PlaceEditableFields;
+  } => {
+    if (!place) return { changes: {}, original: {} };
+
+    const changes: PlaceEditableFields = {};
+    const original: PlaceEditableFields = {};
+
+    if (name.trim() !== place.name) {
+      changes.name = name.trim();
+      original.name = place.name;
+    }
+    if (description.trim() !== place.description) {
+      changes.description = description.trim();
+      original.description = place.description;
+    }
+    if (selectedCategory !== place.category) {
+      changes.category = selectedCategory;
+      original.category = place.category;
+    }
+    if (subcategory.trim() !== (place.subcategory ?? '')) {
+      changes.subcategory = subcategory.trim();
+      original.subcategory = place.subcategory;
+    }
+    if (address.trim() !== place.address) {
+      changes.address = address.trim();
+      original.address = place.address;
+    }
+    if (city.trim() !== place.city) {
+      changes.city = city.trim();
+      original.city = place.city;
+    }
+    if (country.trim() !== place.country) {
+      changes.country = country.trim();
+      original.country = place.country;
+    }
+    if ((selectedBudget ?? null) !== (place.budgetTier ?? null)) {
+      changes.budgetTier = selectedBudget;
+      original.budgetTier = place.budgetTier ?? null;
+    }
+
+    // Re-generate tags if category/budget/city/country changed
+    if (changes.category || changes.budgetTier !== undefined || changes.city || changes.country) {
+      const newTags = generateTags({
+        category: selectedCategory,
+        subcategory: subcategory.trim() || undefined,
+        budgetTier: selectedBudget,
+        city: city.trim() || undefined,
+        country: country.trim() || undefined,
+      });
+      // Merge manual tags
+      const allTags = Array.from(new Set([...newTags, ...manualTags]));
+      changes.tags = allTags;
+      original.tags = place.tags;
+    } else if (manualTags.length > 0) {
+      // Only manual tags added
+      const allTags = Array.from(new Set([...place.tags, ...manualTags]));
+      if (allTags.length !== place.tags.length || !allTags.every((t) => place.tags.includes(t))) {
+        changes.tags = allTags;
+        original.tags = place.tags;
+      }
+    }
+
+    return { changes, original };
+  };
+
+  const handleAddManualTag = () => {
+    const tags = manualTagInput
+      .split(',')
+      .map((t) => t.trim().toLowerCase())
+      .filter((t) => t.length > 0 && !manualTags.includes(t));
+    if (tags.length > 0) {
+      setManualTags((prev) => [...prev, ...tags]);
+      setManualTagInput('');
+    }
+  };
+
+  const handleRemoveManualTag = (tag: string) => {
+    setManualTags((prev) => prev.filter((t) => t !== tag));
+  };
+
+  const handleSave = async () => {
+    if (!place || !user || !profile) return;
+
+    if (!name.trim()) {
+      Alert.alert('Required', 'Place name is required.');
+      return;
+    }
+
+    const { changes, original } = computeChanges();
+
+    if (Object.keys(changes).length === 0) {
+      Alert.alert('No Changes', 'No fields were modified.');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      if (isEditMode) {
+        await updatePlace(place.id, changes);
+        Alert.alert('Updated', 'Place has been updated.', [
+          { text: 'OK', onPress: () => router.back() },
+        ]);
+      } else {
+        await submitEditSuggestion({
+          placeId: place.id,
+          placeName: place.name,
+          submittedBy: user.uid,
+          submittedByName: profile.displayName || 'Anonymous',
+          submittedByPhoto: profile.photoURL || '',
+          status: 'pending',
+          changes,
+          originalValues: original,
+        });
+        Alert.alert(
+          'Suggestion Submitted',
+          'Your edit suggestion has been sent for admin review.',
+          [{ text: 'OK', onPress: () => router.back() }],
+        );
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Could not save changes. Please try again.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // Loading / not found guard
+  if (!place) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.header}>
+          <Pressable onPress={() => router.back()}>
+            <Ionicons name="close" size={22} color={colors.text.primary} />
+          </Pressable>
+          <Text style={styles.headerTitle}>{title}</Text>
+          <View style={{ width: 22 }} />
+        </View>
+        <View style={styles.centered}>
+          <ActivityIndicator size="large" color={colors.gold.primary} />
+          <Text style={styles.loadingText}>Loading place...</Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <KeyboardAvoidingView
+      style={[styles.container, { paddingTop: insets.top }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+    >
+      {/* Header */}
+      <View style={styles.header}>
+        <Pressable onPress={() => router.back()}>
+          <Ionicons name="close" size={22} color={colors.text.primary} />
+        </Pressable>
+        <Text style={styles.headerTitle}>{title}</Text>
+        <Pressable onPress={handleSave} disabled={isSaving}>
+          {isSaving ? (
+            <ActivityIndicator size="small" color={colors.gold.primary} />
+          ) : (
+            <Text style={styles.saveText}>SAVE</Text>
+          )}
+        </Pressable>
+      </View>
+
+      <ScrollView
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={[styles.scrollContent, { paddingBottom: insets.bottom + spacing.xxl }]}
+        keyboardShouldPersistTaps="handled"
+      >
+        {/* Mode badge */}
+        <View style={styles.modeBadge}>
+          <Ionicons
+            name={isEditMode ? 'create-outline' : 'git-pull-request-outline'}
+            size={14}
+            color={isEditMode ? colors.gold.primary : colors.text.secondary}
+          />
+          <Text style={styles.modeBadgeText}>
+            {isEditMode
+              ? 'Admin: Changes apply immediately'
+              : 'Changes will be submitted for admin review'}
+          </Text>
+        </View>
+
+        {/* ---- Name ---- */}
+        <Text style={styles.label}>NAME *</Text>
+        <TextInput
+          style={styles.input}
+          value={name}
+          onChangeText={setName}
+          placeholder="Place name"
+          placeholderTextColor={colors.text.tertiary}
+          editable={!isSaving}
+        />
+
+        {/* ---- Category ---- */}
+        <Text style={styles.label}>CATEGORY</Text>
+        <View style={styles.categoryGrid}>
+          {CATEGORIES.map((cat) => (
+            <Pressable
+              key={cat.key}
+              style={[
+                styles.categoryChip,
+                selectedCategory === cat.key && styles.categoryChipActive,
+              ]}
+              onPress={() => setSelectedCategory(cat.key)}
+              disabled={isSaving}
+            >
+              <Text style={styles.categoryEmoji}>{cat.emoji}</Text>
+              <Text
+                style={[
+                  styles.categoryLabel,
+                  selectedCategory === cat.key && styles.categoryLabelActive,
+                ]}
+              >
+                {cat.label.toUpperCase()}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {/* ---- Subcategory ---- */}
+        <Text style={styles.label}>SUBCATEGORY</Text>
+        <TextInput
+          style={styles.input}
+          value={subcategory}
+          onChangeText={setSubcategory}
+          placeholder="e.g. Pizza Place, Boutique Hotel"
+          placeholderTextColor={colors.text.tertiary}
+          editable={!isSaving}
+        />
+
+        {/* ---- Price Range ---- */}
+        <Text style={styles.label}>PRICE RANGE</Text>
+        <View style={styles.budgetGrid}>
+          {BUDGET_TIERS.map((tier) => (
+            <Pressable
+              key={tier.key}
+              style={[
+                styles.budgetChip,
+                selectedBudget === tier.key && styles.budgetChipActive,
+              ]}
+              onPress={() =>
+                setSelectedBudget(selectedBudget === tier.key ? null : tier.key)
+              }
+              disabled={isSaving}
+            >
+              <Text
+                style={[
+                  styles.budgetIcon,
+                  selectedBudget === tier.key && styles.budgetIconActive,
+                ]}
+              >
+                {tier.icon}
+              </Text>
+              <Text
+                style={[
+                  styles.budgetLabel,
+                  selectedBudget === tier.key && styles.budgetLabelActive,
+                ]}
+              >
+                {tier.label.toUpperCase()}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        {/* ---- Description ---- */}
+        <Text style={styles.label}>DESCRIPTION</Text>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          value={description}
+          onChangeText={setDescription}
+          placeholder="Tell us about this place..."
+          placeholderTextColor={colors.text.tertiary}
+          multiline
+          numberOfLines={4}
+          textAlignVertical="top"
+          editable={!isSaving}
+        />
+
+        {/* ---- Address ---- */}
+        <Text style={styles.label}>ADDRESS</Text>
+        <TextInput
+          style={styles.input}
+          value={address}
+          onChangeText={setAddress}
+          placeholder="Street address"
+          placeholderTextColor={colors.text.tertiary}
+          editable={!isSaving}
+        />
+
+        {/* ---- City & Country ---- */}
+        <View style={styles.row}>
+          <View style={styles.halfField}>
+            <Text style={styles.label}>CITY</Text>
+            <TextInput
+              style={styles.input}
+              value={city}
+              onChangeText={setCity}
+              placeholder="City"
+              placeholderTextColor={colors.text.tertiary}
+              editable={!isSaving}
+            />
+          </View>
+          <View style={styles.halfField}>
+            <Text style={styles.label}>COUNTRY</Text>
+            <TextInput
+              style={styles.input}
+              value={country}
+              onChangeText={setCountry}
+              placeholder="Country"
+              placeholderTextColor={colors.text.tertiary}
+              editable={!isSaving}
+            />
+          </View>
+        </View>
+
+        {/* ---- Tags ---- */}
+        <Text style={styles.label}>TAGS</Text>
+        {/* Existing auto-tags (read-only) */}
+        <View style={styles.tagsContainer}>
+          {place.tags.slice(0, 12).map((tag) => (
+            <View key={tag} style={styles.autoTag}>
+              <Text style={styles.autoTagText}>{tag}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Manual tags */}
+        {manualTags.length > 0 && (
+          <View style={styles.tagsContainer}>
+            {manualTags.map((tag) => (
+              <Pressable
+                key={tag}
+                style={styles.manualTag}
+                onPress={() => handleRemoveManualTag(tag)}
+              >
+                <Text style={styles.manualTagText}>{tag}</Text>
+                <Ionicons name="close" size={12} color={colors.gold.primary} />
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {/* Tag input */}
+        <View style={styles.tagInputRow}>
+          <TextInput
+            style={[styles.input, styles.tagInput]}
+            value={manualTagInput}
+            onChangeText={setManualTagInput}
+            placeholder="Add tags (comma separated)"
+            placeholderTextColor={colors.text.tertiary}
+            onSubmitEditing={handleAddManualTag}
+            returnKeyType="done"
+            editable={!isSaving}
+          />
+          <Pressable style={styles.addTagButton} onPress={handleAddManualTag}>
+            <Ionicons name="add" size={18} color={colors.gold.primary} />
+          </Pressable>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background.primary,
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  loadingText: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 13,
+    color: colors.text.tertiary,
+  },
+
+  // Header
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    borderBottomWidth: 0.5,
+    borderBottomColor: colors.ui.border,
+  },
+  headerTitle: {
+    fontFamily: fonts.serif.bold,
+    fontSize: 18,
+    color: colors.text.primary,
+    letterSpacing: 0.5,
+  },
+  saveText: {
+    fontFamily: fonts.sans.semiBold,
+    fontSize: 13,
+    color: colors.gold.primary,
+    letterSpacing: 2,
+  },
+
+  // Content
+  scrollContent: {
+    paddingHorizontal: spacing.lg,
+  },
+
+  // Mode badge
+  modeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    backgroundColor: colors.gold.primary + '10',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderRadius: radius.sm,
+    borderWidth: 0.5,
+    borderColor: colors.gold.muted + '30',
+    marginTop: spacing.lg,
+    marginBottom: spacing.sm,
+  },
+  modeBadgeText: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 11,
+    color: colors.text.secondary,
+    letterSpacing: 0.3,
+    flex: 1,
+  },
+
+  // Form
+  label: {
+    fontFamily: fonts.sans.semiBold,
+    fontSize: 11,
+    color: colors.text.tertiary,
+    letterSpacing: 2,
+    marginTop: spacing.lg,
+    marginBottom: spacing.xs,
+  },
+  input: {
+    backgroundColor: colors.background.tertiary,
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    fontFamily: fonts.sans.regular,
+    fontSize: 15,
+    color: colors.text.primary,
+    borderWidth: 1,
+    borderColor: colors.ui.border,
+  },
+  textArea: {
+    height: 100,
+    paddingTop: spacing.md,
+  },
+  row: {
+    flexDirection: 'row',
+    gap: spacing.md,
+  },
+  halfField: {
+    flex: 1,
+  },
+
+  // Categories
+  categoryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  categoryChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.background.tertiary,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.ui.border,
+    gap: 6,
+  },
+  categoryChipActive: {
+    backgroundColor: colors.gold.primary + '15',
+    borderColor: colors.gold.primary,
+  },
+  categoryEmoji: {
+    fontSize: 13,
+  },
+  categoryLabel: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 10,
+    color: colors.text.secondary,
+    letterSpacing: 1.5,
+  },
+  categoryLabelActive: {
+    color: colors.gold.primary,
+  },
+
+  // Budget
+  budgetGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  budgetChip: {
+    flex: 1,
+    minWidth: 70,
+    alignItems: 'center',
+    backgroundColor: colors.background.tertiary,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.md,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.ui.border,
+    gap: 4,
+  },
+  budgetChipActive: {
+    backgroundColor: colors.gold.primary + '15',
+    borderColor: colors.gold.primary,
+  },
+  budgetIcon: {
+    fontFamily: fonts.sans.semiBold,
+    fontSize: 14,
+    color: colors.text.secondary,
+  },
+  budgetIconActive: {
+    color: colors.gold.primary,
+  },
+  budgetLabel: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 9,
+    color: colors.text.tertiary,
+    letterSpacing: 1,
+  },
+  budgetLabelActive: {
+    color: colors.gold.primary,
+  },
+
+  // Tags
+  tagsContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: spacing.xs,
+  },
+  autoTag: {
+    backgroundColor: colors.background.tertiary,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    borderWidth: 0.5,
+    borderColor: colors.ui.border,
+  },
+  autoTagText: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 11,
+    color: colors.text.tertiary,
+    letterSpacing: 0.3,
+  },
+  manualTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.gold.primary + '15',
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    borderWidth: 0.5,
+    borderColor: colors.gold.muted + '30',
+  },
+  manualTagText: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 11,
+    color: colors.gold.primary,
+    letterSpacing: 0.3,
+  },
+  tagInputRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginTop: spacing.sm,
+  },
+  tagInput: {
+    flex: 1,
+  },
+  addTagButton: {
+    width: 44,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.background.tertiary,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.ui.border,
+  },
+});
