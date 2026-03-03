@@ -1,5 +1,6 @@
 import { create } from 'zustand';
-import { PlaceCategory, BudgetTier } from '../types';
+import { PlaceCategory, BudgetTier, UserPlace } from '../types';
+import { getDocuments, where } from '../services/firebase/firestore';
 
 // Region type inlined to avoid importing react-native-maps on web
 interface Region {
@@ -35,6 +36,8 @@ interface MapState {
   activeBudgetFilters: BudgetTier[];
   selectedPlaceId: string | null;
   isFilterModalVisible: boolean;
+  selectedFriendId: string | null;
+  friendPlaceIds: string[];
 }
 
 interface MapActions {
@@ -47,6 +50,8 @@ interface MapActions {
   clearBudgetFilters: () => void;
   selectPlace: (placeId: string | null) => void;
   toggleFilterModal: () => void;
+  setFriendFilter: (friendUid: string) => Promise<void>;
+  clearFriendFilter: () => void;
 }
 
 export const useMapStore = create<MapState & MapActions>((set, get) => ({
@@ -56,6 +61,8 @@ export const useMapStore = create<MapState & MapActions>((set, get) => ({
   activeBudgetFilters: [...ALL_BUDGET_TIERS],
   selectedPlaceId: null,
   isFilterModalVisible: false,
+  selectedFriendId: null,
+  friendPlaceIds: [],
 
   // Actions
   setRegion: (region) => {
@@ -116,5 +123,22 @@ export const useMapStore = create<MapState & MapActions>((set, get) => ({
     set((state) => ({
       isFilterModalVisible: !state.isFilterModalVisible,
     }));
+  },
+
+  setFriendFilter: async (friendUid: string) => {
+    set({ selectedFriendId: friendUid, friendPlaceIds: [] });
+    try {
+      const userPlaces = await getDocuments<UserPlace>('userPlaces', [
+        where('userId', '==', friendUid),
+      ]);
+      set({ friendPlaceIds: userPlaces.map((up) => up.placeId) });
+    } catch (error) {
+      console.error('Error fetching friend places:', error);
+      set({ selectedFriendId: null, friendPlaceIds: [] });
+    }
+  },
+
+  clearFriendFilter: () => {
+    set({ selectedFriendId: null, friendPlaceIds: [] });
   },
 }));

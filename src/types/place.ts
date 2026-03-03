@@ -146,3 +146,22 @@ export interface EditSuggestion {
   updatedAt: Timestamp;
   reviewedBy?: string;
 }
+
+// ---------------------------------------------------------------------------
+// Deletion requests
+// ---------------------------------------------------------------------------
+
+export type DeletionRequestStatus = 'pending' | 'approved' | 'rejected';
+
+export interface DeletionRequest {
+  id: string;
+  placeId: string;
+  placeName: string;
+  reason: string;
+  requestedBy: string;
+  requestedByName: string;
+  requestedByPhoto: string;
+  status: DeletionRequestStatus;
+  createdAt: Timestamp;
+  reviewedBy?: string;
+}

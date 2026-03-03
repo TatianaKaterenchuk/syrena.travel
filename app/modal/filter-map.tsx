@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fonts, spacing, radius, shadows } from '../../src/theme';
 import { PlaceCategory, BudgetTier, BUDGET_LABELS, BUDGET_ICONS } from '../../src/types';
 import { CATEGORIES } from '../../src/constants/categories';
-import { useMapStore } from '../../src/stores';
+import { useMapStore, useFriendsStore } from '../../src/stores';
 
 const ALL_BUDGET_TIERS: BudgetTier[] = [1, 2, 3, 4];
 
@@ -16,7 +16,9 @@ export default function FilterMapModal() {
   const {
     activeFilters, toggleFilter, setAllFilters, clearFilters,
     activeBudgetFilters, toggleBudgetFilter, setAllBudgetFilters, clearBudgetFilters,
+    selectedFriendId, setFriendFilter, clearFriendFilter,
   } = useMapStore();
+  const { friends } = useFriendsStore();
 
   // Local draft so changes only commit on "Apply"
   const [draft, setDraft] = useState<Set<PlaceCategory>>(
@@ -25,6 +27,7 @@ export default function FilterMapModal() {
   const [budgetDraft, setBudgetDraft] = useState<Set<BudgetTier>>(
     new Set(activeBudgetFilters),
   );
+  const [friendDraft, setFriendDraft] = useState<string | null>(selectedFriendId);
 
   const toggle = (key: PlaceCategory) => {
     setDraft((prev) => {
@@ -53,14 +56,16 @@ export default function FilterMapModal() {
   const selectAll = () => {
     setDraft(new Set(CATEGORIES.map((c) => c.key)));
     setBudgetDraft(new Set(ALL_BUDGET_TIERS));
+    setFriendDraft(null);
   };
 
   const clearAll = () => {
     setDraft(new Set());
     setBudgetDraft(new Set());
+    setFriendDraft(null);
   };
 
-  const allSelected = draft.size === CATEGORIES.length && budgetDraft.size === ALL_BUDGET_TIERS.length;
+  const allSelected = draft.size === CATEGORIES.length && budgetDraft.size === ALL_BUDGET_TIERS.length && !friendDraft;
   const noneSelected = draft.size === 0;
 
   const handleApply = () => {
@@ -95,6 +100,14 @@ export default function FilterMapModal() {
         }
       }
     }
+
+    // Sync friend filter
+    if (friendDraft) {
+      setFriendFilter(friendDraft);
+    } else {
+      clearFriendFilter();
+    }
+
     router.back();
   };
 
@@ -259,6 +272,56 @@ export default function FilterMapModal() {
               })}
             </View>
           </View>
+
+          {/* Friend Filter Section */}
+          {friends.length > 0 && (
+            <View style={styles.friendSection}>
+              <View style={styles.budgetHeader}>
+                <Ionicons name="people-outline" size={16} color={colors.gold.primary} />
+                <Text style={styles.budgetTitle}>By Friend</Text>
+              </View>
+              <Text style={styles.subtitle}>
+                {friendDraft
+                  ? `Showing ${friends.find((f) => f.uid === friendDraft)?.displayName || 'friend'}'s picks`
+                  : 'Show all — or tap a friend to filter'}
+              </Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.friendScroll}>
+                {friends.map((friend) => {
+                  const isActive = friendDraft === friend.uid;
+                  return (
+                    <Pressable
+                      key={friend.uid}
+                      onPress={() => setFriendDraft(isActive ? null : friend.uid)}
+                      style={[
+                        styles.friendChip,
+                        isActive && styles.friendChipActive,
+                      ]}
+                    >
+                      {friend.photoURL ? (
+                        <Image source={{ uri: friend.photoURL }} style={styles.friendChipAvatar} />
+                      ) : (
+                        <View style={[styles.friendChipAvatar, styles.friendChipAvatarFallback]}>
+                          <Ionicons name="person" size={14} color={colors.text.tertiary} />
+                        </View>
+                      )}
+                      <Text
+                        style={[
+                          styles.friendChipName,
+                          isActive && styles.friendChipNameActive,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {friend.displayName?.split(' ')[0] || 'Friend'}
+                      </Text>
+                      {isActive && (
+                        <Ionicons name="checkmark-circle" size={14} color={colors.gold.primary} />
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            </View>
+          )}
         </ScrollView>
 
         {/* Apply Button */}
@@ -491,6 +554,50 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   budgetLabelActive: {
+    color: colors.gold.primary,
+  },
+
+  /* Friend Filter */
+  friendSection: {
+    paddingHorizontal: spacing.xl,
+    marginBottom: spacing.xl,
+  },
+  friendScroll: {
+    flexDirection: 'row',
+  },
+  friendChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: radius.full,
+    backgroundColor: colors.ui.cardBg,
+    borderWidth: 1,
+    borderColor: colors.ui.border,
+    marginRight: spacing.sm,
+    gap: spacing.xs,
+  },
+  friendChipActive: {
+    backgroundColor: colors.gold.primary + '18',
+    borderColor: colors.gold.primary + '55',
+  },
+  friendChipAvatar: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+  },
+  friendChipAvatarFallback: {
+    backgroundColor: colors.background.tertiary,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  friendChipName: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 13,
+    color: colors.text.secondary,
+    maxWidth: 80,
+  },
+  friendChipNameActive: {
     color: colors.gold.primary,
   },
 

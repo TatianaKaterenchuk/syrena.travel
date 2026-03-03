@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -26,11 +26,7 @@ import { getDocuments, createDocument, updateDocument, orderBy } from '../../src
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
-const FALLBACK_IMAGES = [
-  'https://picsum.photos/800/500?random=50',
-  'https://picsum.photos/800/500?random=51',
-  'https://picsum.photos/800/500?random=52',
-];
+const FALLBACK_IMAGES: string[] = [];
 
 function formatTimeAgo(timestamp: Timestamp): string {
   const now = Date.now();
@@ -57,7 +53,8 @@ export default function PlaceDetailModal() {
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [reviews, setReviews] = useState<Review[]>([]);
 
-  const { places, userPlaces, savePlace, removePlace, toggleFavorite, toggleGoldStar } = usePlacesStore();
+  const { places, userPlaces, savePlace, removePlace, toggleFavorite, toggleGoldStar, requestDeletion } = usePlacesStore();
+  const scrollViewRef = useRef<ScrollView>(null);
   const { user, profile } = useAuthStore();
 
   // Review form state
@@ -205,6 +202,36 @@ export default function PlaceDetailModal() {
     }
   };
 
+  const handleRequestDeletion = () => {
+    if (!place || !user) return;
+    Alert.prompt(
+      'Request Deletion',
+      `Why should "${place.name}" be removed?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Submit',
+          style: 'destructive',
+          onPress: async (reason?: string) => {
+            if (!reason?.trim()) {
+              Alert.alert('Reason Required', 'Please provide a reason.');
+              return;
+            }
+            try {
+              await requestDeletion(place.id, place.name, reason.trim());
+              Alert.alert('Submitted', 'Your deletion request has been sent to an admin for review.');
+            } catch {
+              Alert.alert('Error', 'Could not submit deletion request.');
+            }
+          },
+        },
+      ],
+      'plain-text',
+      '',
+      'default',
+    );
+  };
+
   // Check if user already reviewed
   const hasReviewed = useMemo(
     () => reviews.some((r) => r.userId === user?.uid),
@@ -238,8 +265,14 @@ export default function PlaceDetailModal() {
       ? place.imageURLs
       : FALLBACK_IMAGES;
 
+  const isCreator = place?.createdBy === user?.uid;
+
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <KeyboardAvoidingView
+      style={[styles.container, { paddingTop: insets.top }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={0}
+    >
       {/* Header */}
       <View style={styles.header}>
         <Pressable style={styles.headerButton} onPress={() => router.back()}>
@@ -281,38 +314,49 @@ export default function PlaceDetailModal() {
       </View>
 
       <ScrollView
+        ref={scrollViewRef}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
+        keyboardShouldPersistTaps="handled"
       >
         {/* Image Gallery */}
-        <FlatList
-          data={images}
-          horizontal
-          pagingEnabled
-          showsHorizontalScrollIndicator={false}
-          onMomentumScrollEnd={(e) => {
-            const index = Math.round(
-              e.nativeEvent.contentOffset.x / SCREEN_WIDTH,
-            );
-            setActiveImageIndex(index);
-          }}
-          keyExtractor={(_, i) => i.toString()}
-          renderItem={({ item }) => (
-            <Image source={{ uri: item }} style={styles.galleryImage} />
-          )}
-        />
-        {/* Image Pagination */}
-        <View style={styles.pagination}>
-          {images.map((_, i) => (
-            <View
-              key={i}
-              style={[
-                styles.paginationDot,
-                i === activeImageIndex && styles.paginationDotActive,
-              ]}
+        {images.length > 0 ? (
+          <>
+            <FlatList
+              data={images}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={(e) => {
+                const index = Math.round(
+                  e.nativeEvent.contentOffset.x / SCREEN_WIDTH,
+                );
+                setActiveImageIndex(index);
+              }}
+              keyExtractor={(_, i) => i.toString()}
+              renderItem={({ item }) => (
+                <Image source={{ uri: item }} style={styles.galleryImage} />
+              )}
             />
-          ))}
-        </View>
+            {/* Image Pagination */}
+            <View style={styles.pagination}>
+              {images.map((_, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.paginationDot,
+                    i === activeImageIndex && styles.paginationDotActive,
+                  ]}
+                />
+              ))}
+            </View>
+          </>
+        ) : (
+          <View style={styles.noImagePlaceholder}>
+            <Ionicons name="image-outline" size={40} color={colors.text.tertiary + '60'} />
+            <Text style={styles.noImageText}>No photos yet</Text>
+          </View>
+        )}
 
         {/* Place Info */}
         <View style={styles.infoSection}>
@@ -501,6 +545,9 @@ export default function PlaceDetailModal() {
                   multiline
                   numberOfLines={3}
                   textAlignVertical="top"
+                  onFocus={() => {
+                    setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 300);
+                  }}
                 />
                 <View style={styles.reviewFormActions}>
                   <Pressable
@@ -599,6 +646,11 @@ export default function PlaceDetailModal() {
             {profile?.isAdmin ? 'Edit' : 'Suggest Edit'}
           </Text>
         </Pressable>
+        {(isCreator || profile?.isAdmin) && (
+          <Pressable style={styles.deleteButton} onPress={handleRequestDeletion}>
+            <Ionicons name="trash-outline" size={18} color={colors.ui.error} />
+          </Pressable>
+        )}
         <Pressable style={styles.directionsButton} onPress={handleDirections}>
           <Ionicons
             name="navigate"
@@ -608,7 +660,7 @@ export default function PlaceDetailModal() {
           <Text style={styles.directionsText}>Directions</Text>
         </Pressable>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -665,6 +717,20 @@ const styles = StyleSheet.create({
     width: SCREEN_WIDTH,
     height: 300,
     backgroundColor: colors.background.tertiary,
+  },
+  noImagePlaceholder: {
+    width: SCREEN_WIDTH,
+    height: 200,
+    backgroundColor: colors.background.tertiary,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  noImageText: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 13,
+    color: colors.text.tertiary,
+    letterSpacing: 0.5,
   },
   pagination: {
     flexDirection: 'row',
@@ -1078,6 +1144,15 @@ const styles = StyleSheet.create({
     color: colors.gold.primary,
     letterSpacing: 1,
     textTransform: 'uppercase',
+  },
+  deleteButton: {
+    width: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    borderRadius: radius.sm,
+    borderWidth: 0.5,
+    borderColor: colors.ui.error + '40',
   },
   directionsButton: {
     flex: 1,

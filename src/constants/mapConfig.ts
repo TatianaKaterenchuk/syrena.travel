@@ -61,18 +61,18 @@ export const CUSTOM_MAP_STYLE = [
   },
   {
     featureType: 'poi',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#8a8275' }],
-  },
-  {
-    featureType: 'poi',
-    elementType: 'labels.text.stroke',
-    stylers: [{ color: '#111714' }],
+    elementType: 'labels',
+    stylers: [{ visibility: 'off' }],
   },
   {
     featureType: 'poi',
     elementType: 'labels.icon',
-    stylers: [{ visibility: 'on' }, { saturation: -60 }, { lightness: -20 }],
+    stylers: [{ visibility: 'off' }],
+  },
+  {
+    featureType: 'poi.park',
+    elementType: 'labels',
+    stylers: [{ visibility: 'simplified' }],
   },
   {
     featureType: 'poi.park',
@@ -92,7 +92,12 @@ export const CUSTOM_MAP_STYLE = [
   {
     featureType: 'road',
     elementType: 'labels.text.fill',
-    stylers: [{ color: '#6b655c' }],
+    stylers: [{ color: '#4a4540' }],
+  },
+  {
+    featureType: 'road.local',
+    elementType: 'labels',
+    stylers: [{ visibility: 'off' }],
   },
   {
     featureType: 'road.highway',

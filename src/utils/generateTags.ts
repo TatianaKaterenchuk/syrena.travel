@@ -56,6 +56,73 @@ const TAG_EXPANSIONS: Record<string, string[]> = {
   coffee_shop: ['coffee', 'cafe'],
 };
 
+// ---------------------------------------------------------------------------
+// Tag normalization: map variant names → canonical form
+// Applied after all tags are generated to deduplicate similar terms.
+// ---------------------------------------------------------------------------
+
+const TAG_NORMALIZATION: Record<string, string> = {
+  // Coffee variants → cafe
+  'coffee shop': 'cafe',
+  'coffee bar': 'cafe',
+  'coffee house': 'cafe',
+  'coffee': 'cafe',
+  'coffeeshop': 'cafe',
+  'espresso bar': 'cafe',
+
+  // Restaurant variants
+  'eatery': 'restaurant',
+  'dining': 'restaurant',
+  'diner': 'restaurant',
+  'bistro': 'restaurant',
+
+  // Bar variants
+  'pub': 'bar',
+  'tavern': 'bar',
+  'taproom': 'bar',
+  'lounge': 'bar',
+
+  // Nightlife variants
+  'club': 'nightclub',
+  'night club': 'nightclub',
+  'disco': 'nightclub',
+
+  // Nature variants
+  'outdoor': 'nature',
+  'green space': 'park',
+  'garden': 'park',
+  'gardens': 'park',
+
+  // Shopping variants
+  'store': 'shop',
+  'boutique': 'shop',
+  'market': 'shop',
+
+  // Chocolate / sweets
+  'chocolate shop': 'sweets',
+  'chocolaterie': 'sweets',
+  'candy store': 'sweets',
+  'patisserie': 'bakery',
+  'pastry shop': 'bakery',
+  'pastry': 'bakery',
+
+  // Accommodation
+  'accommodation': 'hotel',
+  'lodging': 'hotel',
+  'hostel': 'hotel',
+  'guesthouse': 'hotel',
+  'guest house': 'hotel',
+
+  // Wellness
+  'wellness': 'spa',
+  'relaxation': 'spa',
+
+  // Culture
+  'sightseeing': 'landmark',
+  'tourist': 'landmark',
+  'historic': 'historical',
+};
+
 // Noisy Google types that add no search value
 const IGNORED_TYPES = new Set([
   'point_of_interest',
@@ -134,7 +201,13 @@ export function generateTags(input: GenerateTagsInput): string[] {
   // Remove empty string if any
   tags.delete('');
 
-  return Array.from(tags);
+  // Normalize similar tags to canonical forms
+  const normalized = new Set<string>();
+  for (const tag of tags) {
+    normalized.add(TAG_NORMALIZATION[tag] ?? tag);
+  }
+
+  return Array.from(normalized);
 }
 
 /**
@@ -151,5 +224,10 @@ export function expandManualTags(manualTags: string[]): string[] {
       TAG_EXPANSIONS[lower] || TAG_EXPANSIONS[lower.replace(/ /g, '_')];
     if (expansions) expansions.forEach((t) => result.add(t));
   }
-  return Array.from(result);
+  // Normalize
+  const normalized = new Set<string>();
+  for (const tag of result) {
+    normalized.add(TAG_NORMALIZATION[tag] ?? tag);
+  }
+  return Array.from(normalized);
 }

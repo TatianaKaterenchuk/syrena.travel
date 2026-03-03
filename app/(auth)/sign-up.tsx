@@ -181,7 +181,7 @@ export default function SignUpScreen() {
 
           <View>
             <Text style={styles.label}>ABOUT YOU</Text>
-            <Text style={styles.labelHint}>Only visible to admins</Text>
+            <Text style={styles.labelHint}>This will be your profile bio</Text>
             <View style={[styles.inputContainer, styles.multilineContainer]}>
               <TextInput
                 style={[styles.input, styles.multilineInput]}

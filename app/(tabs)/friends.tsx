@@ -94,10 +94,9 @@ export default function FriendsScreen() {
   const [mutualFriendsMap, setMutualFriendsMap] = useState<Record<string, Friend[]>>({});
   const { getMutualFriends } = useFriendsStore();
 
-  // Fetch suggestions when search panel opens
+  // Fetch suggestions on mount and when friends change
   useEffect(() => {
-    if (!showSearch || !user?.uid) return;
-    if (suggestions.length > 0) return; // already loaded
+    if (!user?.uid) return;
     let cancelled = false;
     (async () => {
       setLoadingSuggestions(true);
@@ -105,14 +104,16 @@ export default function FriendsScreen() {
         const allUsers = await getDocuments<UserProfile>('users', []);
         const friendUids = new Set(friends.map((f) => f.uid));
         const pendingUids = new Set(sentRequests.map((r) => r.toUid));
+        const incomingUids = new Set(requests.map((r) => r.fromUid));
         const suggested = allUsers.filter(
           (u) =>
             (u.uid || (u as any).id) !== user.uid &&
             !friendUids.has(u.uid || (u as any).id) &&
             !pendingUids.has(u.uid || (u as any).id) &&
+            !incomingUids.has(u.uid || (u as any).id) &&
             u.status === 'approved',
         );
-        if (!cancelled) setSuggestions(suggested.slice(0, 8));
+        if (!cancelled) setSuggestions(suggested);
       } catch (error) {
         console.error('Error fetching suggestions:', error);
       } finally {
@@ -120,7 +121,7 @@ export default function FriendsScreen() {
       }
     })();
     return () => { cancelled = true; };
-  }, [showSearch, user?.uid]);
+  }, [user?.uid, friends.length, sentRequests.length, requests.length]);
 
   // Fetch mutual friends for search results and suggestions
   const usersForMutual = searchResults.length > 0 ? searchResults : suggestions;
@@ -400,7 +401,7 @@ export default function FriendsScreen() {
             <>
               <Text style={styles.suggestionsLabel}>SUGGESTED</Text>
               <FlatList
-                data={suggestions}
+                data={suggestions.slice(0, 8)}
                 keyExtractor={(item) => item.uid || (item as any).id}
                 renderItem={renderSearchResult}
                 keyboardShouldPersistTaps="handled"
@@ -503,6 +504,79 @@ export default function FriendsScreen() {
               showsVerticalScrollIndicator={false}
               contentContainerStyle={styles.list}
               ItemSeparatorComponent={() => <View style={styles.separator} />}
+              ListFooterComponent={
+                suggestions.length > 0 && !friendsFilter.trim() ? (
+                  <View style={styles.suggestionsSection}>
+                    <View style={styles.suggestionsSectionHeader}>
+                      <View style={styles.suggestionsSectionAccent} />
+                      <Text style={styles.suggestionsSectionTitle}>PEOPLE YOU MAY KNOW</Text>
+                    </View>
+                    {suggestions.map((item) => {
+                      const uid = item.uid || (item as any).id;
+                      const alreadyFriend = isFriend(uid);
+                      const pending = hasPendingRequest(uid);
+                      const mutual = mutualFriendsMap[uid] || [];
+                      return (
+                        <View key={uid}>
+                          <View style={styles.userRow}>
+                            <Pressable
+                              style={styles.userRowClickable}
+                              onPress={() => router.push(`/modal/user-profile?id=${uid}`)}
+                            >
+                              {item.photoURL ? (
+                                <Image source={{ uri: item.photoURL }} style={styles.avatar} />
+                              ) : (
+                                <View style={[styles.avatar, styles.avatarFallback]}>
+                                  <Ionicons name="person" size={20} color={colors.text.tertiary} />
+                                </View>
+                              )}
+                              <View style={styles.userInfo}>
+                                <Text style={styles.userName} numberOfLines={1}>
+                                  {item.displayName}
+                                </Text>
+                                <Text style={styles.userHandle}>@{item.username || 'user'}</Text>
+                                {mutual.length > 0 && !alreadyFriend && (
+                                  <View style={styles.mutualRow}>
+                                    <View style={styles.mutualAvatars}>
+                                      {mutual.slice(0, 2).map((f, i) => (
+                                        <Image
+                                          key={f.uid}
+                                          source={{ uri: f.photoURL || undefined }}
+                                          style={[styles.mutualAvatar, { marginLeft: i > 0 ? -6 : 0 }]}
+                                        />
+                                      ))}
+                                    </View>
+                                    <Text style={styles.mutualText}>{mutual.length} in common</Text>
+                                  </View>
+                                )}
+                              </View>
+                            </Pressable>
+                            {alreadyFriend ? (
+                              <View style={styles.friendBadge}>
+                                <Ionicons name="checkmark" size={14} color={colors.ui.success} />
+                                <Text style={styles.friendBadgeText}>FRIENDS</Text>
+                              </View>
+                            ) : pending ? (
+                              <View style={styles.pendingBadge}>
+                                <Text style={styles.pendingBadgeText}>REQUESTED</Text>
+                              </View>
+                            ) : (
+                              <Pressable
+                                style={styles.addFriendButton}
+                                onPress={() => handleSendRequest(item)}
+                              >
+                                <Ionicons name="person-add" size={14} color={colors.gold.primary} />
+                                <Text style={styles.addFriendText}>ADD</Text>
+                              </Pressable>
+                            )}
+                          </View>
+                          <View style={styles.separator} />
+                        </View>
+                      );
+                    })}
+                  </View>
+                ) : null
+              }
               ListEmptyComponent={
                 <View style={styles.emptyState}>
                   <View style={styles.emptyIconCircle}>
@@ -892,6 +966,28 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+
+  // Suggestions section in friends list
+  suggestionsSection: {
+    marginTop: spacing.xl,
+    paddingTop: spacing.md,
+  },
+  suggestionsSectionHeader: {
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+  },
+  suggestionsSectionAccent: {
+    width: 24,
+    height: 2,
+    backgroundColor: colors.gold.primary,
+    marginBottom: spacing.sm,
+  },
+  suggestionsSectionTitle: {
+    fontFamily: fonts.sans.semiBold,
+    fontSize: 10,
+    color: colors.text.tertiary,
+    letterSpacing: 2,
   },
 
   // Empty state

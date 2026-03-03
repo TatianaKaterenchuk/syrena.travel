@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Place, UserPlace, FeaturedPerson, PlaceEditableFields, EditSuggestion } from '../types';
+import { Place, UserPlace, FeaturedPerson, PlaceEditableFields, EditSuggestion, DeletionRequest } from '../types';
 import { sendPushToAdmins } from '../services/notifications';
 import {
   getDocument,
@@ -50,6 +50,10 @@ interface PlacesActions {
   fetchPendingEditSuggestions: () => Promise<EditSuggestion[]>;
   approveEditSuggestion: (suggestion: EditSuggestion) => Promise<void>;
   rejectEditSuggestion: (suggestionId: string) => Promise<void>;
+  requestDeletion: (placeId: string, placeName: string, reason: string) => Promise<void>;
+  fetchPendingDeletionRequests: () => Promise<DeletionRequest[]>;
+  approveDeletion: (request: DeletionRequest) => Promise<void>;
+  rejectDeletion: (requestId: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -477,13 +481,15 @@ export const usePlacesStore = create<PlacesState & PlacesActions>((set, get) => 
         reviewedBy: useAuthStore.getState().user?.uid || '',
       });
       // Optimistic local update for places
+      const changes = { ...suggestion.changes } as Record<string, any>;
+      if (changes.budgetTier === null) changes.budgetTier = undefined;
       set((state) => ({
         places: state.places.map((p) =>
-          p.id === suggestion.placeId ? { ...p, ...suggestion.changes } : p,
-        ),
+          p.id === suggestion.placeId ? { ...p, ...changes } : p,
+        ) as Place[],
         recentDiscoveries: state.recentDiscoveries.map((p) =>
-          p.id === suggestion.placeId ? { ...p, ...suggestion.changes } : p,
-        ),
+          p.id === suggestion.placeId ? { ...p, ...changes } : p,
+        ) as Place[],
       }));
     } catch (error) {
       console.error('Error approving edit suggestion:', error);
@@ -499,6 +505,86 @@ export const usePlacesStore = create<PlacesState & PlacesActions>((set, get) => 
       });
     } catch (error) {
       console.error('Error rejecting edit suggestion:', error);
+      throw error;
+    }
+  },
+
+  // ---------------------------------------------------------------------------
+  // Deletion requests
+  // ---------------------------------------------------------------------------
+
+  requestDeletion: async (placeId, placeName, reason) => {
+    try {
+      const user = useAuthStore.getState().user;
+      const profile = useAuthStore.getState().profile;
+      if (!user || !profile) throw new Error('Not signed in');
+
+      await createDocument('deletionRequests', {
+        placeId,
+        placeName,
+        reason,
+        requestedBy: user.uid,
+        requestedByName: profile.displayName,
+        requestedByPhoto: profile.photoURL || '',
+        status: 'pending',
+      });
+
+      sendPushToAdmins(
+        'Deletion Request',
+        `${profile.displayName} requested deletion of "${placeName}".`,
+        { type: 'deletion_request', placeId },
+      );
+    } catch (error) {
+      console.error('Error requesting deletion:', error);
+      throw error;
+    }
+  },
+
+  fetchPendingDeletionRequests: async () => {
+    try {
+      const requests = await getDocuments<DeletionRequest>('deletionRequests', [
+        where('status', '==', 'pending'),
+      ]);
+      requests.sort((a, b) => {
+        const aTime = a.createdAt?.seconds ?? 0;
+        const bTime = b.createdAt?.seconds ?? 0;
+        return bTime - aTime;
+      });
+      return requests;
+    } catch (error) {
+      console.error('Error fetching deletion requests:', error);
+      return [];
+    }
+  },
+
+  approveDeletion: async (request) => {
+    try {
+      // Delete the place document
+      await deleteDocument('places', request.placeId);
+      // Mark request as approved
+      await updateDocument('deletionRequests', request.id, {
+        status: 'approved',
+        reviewedBy: useAuthStore.getState().user?.uid || '',
+      });
+      // Remove from local state
+      set((state) => ({
+        places: state.places.filter((p) => p.id !== request.placeId),
+        recentDiscoveries: state.recentDiscoveries.filter((p) => p.id !== request.placeId),
+      }));
+    } catch (error) {
+      console.error('Error approving deletion:', error);
+      throw error;
+    }
+  },
+
+  rejectDeletion: async (requestId) => {
+    try {
+      await updateDocument('deletionRequests', requestId, {
+        status: 'rejected',
+        reviewedBy: useAuthStore.getState().user?.uid || '',
+      });
+    } catch (error) {
+      console.error('Error rejecting deletion:', error);
       throw error;
     }
   },

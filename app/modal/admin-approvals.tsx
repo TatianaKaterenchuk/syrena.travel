@@ -15,7 +15,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { where } from 'firebase/firestore';
 import { colors, fonts, spacing, radius } from '../../src/theme';
 import { useAuthStore } from '../../src/stores';
-import { UserProfile, EditSuggestion, PlaceEditableFields } from '../../src/types';
+import { UserProfile, EditSuggestion, PlaceEditableFields, DeletionRequest } from '../../src/types';
 import { getDocuments, updateDocument } from '../../src/services/firebase/firestore';
 import { usePlacesStore } from '../../src/stores/usePlacesStore';
 
@@ -36,11 +36,12 @@ export default function AdminApprovalsModal() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const profile = useAuthStore((s) => s.profile);
-  const { approveEditSuggestion, rejectEditSuggestion } = usePlacesStore();
+  const { approveEditSuggestion, rejectEditSuggestion, approveDeletion, rejectDeletion } = usePlacesStore();
 
-  const [activeTab, setActiveTab] = useState<'users' | 'edits' | 'history'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'edits' | 'deletions' | 'history'>('users');
   const [pendingUsers, setPendingUsers] = useState<UserProfile[]>([]);
   const [pendingEdits, setPendingEdits] = useState<EditSuggestion[]>([]);
+  const [pendingDeletions, setPendingDeletions] = useState<DeletionRequest[]>([]);
   const [historyUsers, setHistoryUsers] = useState<UserProfile[]>([]);
   const [historyEdits, setHistoryEdits] = useState<EditSuggestion[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -131,9 +132,26 @@ export default function AdminApprovalsModal() {
     }
   };
 
+  const fetchPendingDeletions = async () => {
+    try {
+      const deletions = await getDocuments<DeletionRequest>('deletionRequests', [
+        where('status', '==', 'pending'),
+      ]);
+      deletions.sort((a, b) => {
+        const aTime = a.createdAt?.seconds ?? 0;
+        const bTime = b.createdAt?.seconds ?? 0;
+        return bTime - aTime;
+      });
+      setPendingDeletions(deletions);
+    } catch (error) {
+      console.error('Error fetching pending deletions:', error);
+    }
+  };
+
   const handleRefresh = () => {
     fetchPending();
     fetchPendingEdits();
+    fetchPendingDeletions();
     if (activeTab === 'history') {
       fetchHistory();
       fetchHistoryEdits();
@@ -143,6 +161,7 @@ export default function AdminApprovalsModal() {
   useEffect(() => {
     fetchPending();
     fetchPendingEdits();
+    fetchPendingDeletions();
   }, []);
 
   // Fetch history when switching to history tab
@@ -210,6 +229,52 @@ export default function AdminApprovalsModal() {
               setPendingEdits((prev) => prev.filter((e) => e.id !== suggestion.id));
             } catch (error) {
               Alert.alert('Error', 'Could not reject edit suggestion.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  // ── Deletion request handlers ──
+
+  const handleApproveDeletion = (request: DeletionRequest) => {
+    Alert.alert(
+      'Delete Place',
+      `Permanently delete "${request.placeName}"? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await approveDeletion(request);
+              setPendingDeletions((prev) => prev.filter((d) => d.id !== request.id));
+              Alert.alert('Deleted', `"${request.placeName}" has been removed.`);
+            } catch (error) {
+              Alert.alert('Error', 'Could not delete place.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleRejectDeletion = (request: DeletionRequest) => {
+    Alert.alert(
+      'Keep Place',
+      `Keep "${request.placeName}" and reject the deletion request?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Keep',
+          onPress: async () => {
+            try {
+              await rejectDeletion(request.id);
+              setPendingDeletions((prev) => prev.filter((d) => d.id !== request.id));
+            } catch (error) {
+              Alert.alert('Error', 'Could not reject deletion request.');
             }
           },
         },
@@ -428,6 +493,47 @@ export default function AdminApprovalsModal() {
     );
   };
 
+  const renderDeletionRequest = ({ item }: { item: DeletionRequest }) => (
+    <View style={styles.card}>
+      <View style={[styles.cardBrass, { backgroundColor: colors.ui.error }]} />
+      <View style={styles.cardContent}>
+        <View style={styles.userRow}>
+          <Image
+            source={{ uri: item.requestedByPhoto || 'https://i.pravatar.cc/100?img=3' }}
+            style={styles.userAvatar}
+          />
+          <View style={styles.userInfo}>
+            <Text style={styles.userName}>{item.requestedByName}</Text>
+            <Text style={styles.editPlaceName}>
+              <Ionicons name="trash-outline" size={11} color={colors.ui.error} />
+              {'  '}{item.placeName}
+            </Text>
+          </View>
+        </View>
+        <View style={styles.userDetailSection}>
+          <Text style={styles.userDetailLabel}>REASON</Text>
+          <Text style={styles.userDetailValue}>{item.reason}</Text>
+        </View>
+        <View style={styles.actionRow}>
+          <Pressable
+            style={styles.rejectButton}
+            onPress={() => handleApproveDeletion(item)}
+          >
+            <Ionicons name="trash" size={16} color="#fff" />
+            <Text style={styles.rejectText}>DELETE</Text>
+          </Pressable>
+          <Pressable
+            style={styles.approveButton}
+            onPress={() => handleRejectDeletion(item)}
+          >
+            <Ionicons name="shield-checkmark" size={16} color={colors.background.primary} />
+            <Text style={styles.approveText}>KEEP</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+
   const renderEmpty = (message: string) => (
     <View style={styles.centered}>
       <View style={styles.emptyIconRing}>
@@ -480,6 +586,19 @@ export default function AdminApprovalsModal() {
           </Text>
         </Pressable>
         <Pressable
+          style={[styles.tab, activeTab === 'deletions' && styles.tabActive]}
+          onPress={() => setActiveTab('deletions')}
+        >
+          <Ionicons
+            name="trash-outline"
+            size={14}
+            color={activeTab === 'deletions' ? colors.gold.primary : colors.text.tertiary}
+          />
+          <Text style={[styles.tabText, activeTab === 'deletions' && styles.tabTextActive]}>
+            Del ({pendingDeletions.length})
+          </Text>
+        </Pressable>
+        <Pressable
           style={[styles.tab, activeTab === 'history' && styles.tabActive]}
           onPress={() => setActiveTab('history')}
         >
@@ -519,6 +638,18 @@ export default function AdminApprovalsModal() {
             data={pendingEdits}
             keyExtractor={(item) => item.id}
             renderItem={renderEditSuggestion}
+            contentContainerStyle={styles.list}
+            showsVerticalScrollIndicator={false}
+          />
+        )
+      ) : activeTab === 'deletions' ? (
+        pendingDeletions.length === 0 ? (
+          renderEmpty('No pending deletion requests')
+        ) : (
+          <FlatList
+            data={pendingDeletions}
+            keyExtractor={(item) => item.id}
+            renderItem={renderDeletionRequest}
             contentContainerStyle={styles.list}
             showsVerticalScrollIndicator={false}
           />

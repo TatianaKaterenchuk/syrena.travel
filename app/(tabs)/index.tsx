@@ -101,21 +101,17 @@ export default function ExploreScreen() {
   const profile = useAuthStore((s) => s.profile);
   const {
     places,
-    friendsPicks,
     recentDiscoveries,
     featuredPerson,
     featuredPicks,
     isLoading,
     fetchPlaces,
-    fetchFriendsPicks,
     fetchFeaturedPerson,
-    getPopularTags,
     searchPlacesWithMatchedTags,
   } = usePlacesStore();
 
   useEffect(() => {
     fetchPlaces();
-    fetchFriendsPicks();
     fetchFeaturedPerson();
   }, []);
 
@@ -139,11 +135,6 @@ export default function ExploreScreen() {
       handleSearch(searchParam);
     }
   }, [searchParam]);
-
-  const popularTags = useMemo(
-    () => getPopularTags(10),
-    [places, getPopularTags]
-  );
 
   const placesCount = places.length;
   const isAdmin = profile?.isAdmin === true;
@@ -198,32 +189,6 @@ export default function ExploreScreen() {
             </Pressable>
           )}
         </View>
-
-        {/* Popular Tags */}
-        {!isSearching && popularTags.length > 0 && (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.popularTagsContainer}
-            style={styles.popularTagsScroll}
-          >
-            <Ionicons
-              name="pricetags-outline"
-              size={13}
-              color={colors.gold.muted}
-              style={{ marginRight: spacing.sm }}
-            />
-            {popularTags.map((tag) => (
-              <Pressable
-                key={tag}
-                style={styles.popularTagChip}
-                onPress={() => handleSearch(tag)}
-              >
-                <Text style={styles.popularTagText}>{tag}</Text>
-              </Pressable>
-            ))}
-          </ScrollView>
-        )}
 
         {/* Search Results */}
         {isSearching ? (
@@ -293,7 +258,7 @@ export default function ExploreScreen() {
                     pitchEnabled={false}
                     showsUserLocation
                     showsMyLocationButton={false}
-                    showsPointsOfInterest
+                    showsPointsOfInterest={false}
                     userInterfaceStyle="dark"
                     customMapStyle={PROVIDER_GOOGLE ? CUSTOM_MAP_STYLE : undefined}
                   />
@@ -442,7 +407,7 @@ export default function ExploreScreen() {
                           source={{
                             uri:
                               item.imageURLs?.[0] ||
-                              `https://picsum.photos/400/300?random=${item.id}`,
+                              undefined,
                           }}
                           style={styles.placeImage}
                         />
@@ -508,201 +473,42 @@ export default function ExploreScreen() {
               />
             )}
 
-            {/* Friends' Picks */}
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Friends' Picks</Text>
-              {friendsPicks.length > 0 && (
-                <Pressable>
-                  <Text style={styles.seeAllText}>See All</Text>
-                </Pressable>
-              )}
-            </View>
-            {friendsPicks.length === 0 && !isLoading ? (
-              <View style={styles.emptySection}>
-                <View style={styles.emptyIconRingOuter}>
-                  <View style={styles.emptyIconCircle}>
-                    <Ionicons name="people-outline" size={26} color={colors.gold.muted} />
-                  </View>
+            {/* Recently Added — compact list */}
+            {recentDiscoveries.length > 0 && (
+              <>
+                <View style={styles.sectionHeader}>
+                  <Text style={styles.sectionTitle}>Recently Added</Text>
                 </View>
-                <Text style={styles.emptyTitle}>No friends' picks yet</Text>
-                <Text style={styles.emptySubtitle}>
-                  Places your friends save will appear here
-                </Text>
-              </View>
-            ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.cardList}
-              >
-                {friendsPicks.map((item) => (
-                  <Pressable
-                    key={item.id}
-                    style={styles.placeCard}
-                    onPress={() => router.push({ pathname: '/modal/place-detail', params: { id: item.id } })}
-                  >
-                    <Image
-                      source={{
-                        uri:
-                          item.imageURLs?.[0] ||
-                          `https://picsum.photos/400/300?random=${item.id}`,
-                      }}
-                      style={styles.placeImage}
-                    />
-                    <View style={styles.cardBrassLine} />
-                    <View style={styles.placeCardContent}>
-                      <Text style={styles.placeName} numberOfLines={1}>
-                        {item.name}
-                      </Text>
-                      <View
-                        style={[
-                          styles.pill,
-                          {
-                            backgroundColor:
-                              categoryColors[item.category] + '14',
-                            borderColor:
-                              categoryColors[item.category] + '30',
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.pillText,
-                            { color: categoryColors[item.category] },
-                          ]}
-                        >
-                          {item.subcategory || item.category}
-                        </Text>
-                      </View>
-                      <View style={styles.placeLocation}>
-                        <Ionicons
-                          name="location-outline"
-                          size={11}
-                          color={colors.text.tertiary}
-                        />
-                        <Text style={styles.locationText}>
+                <View style={styles.recentList}>
+                  {recentDiscoveries.map((item) => (
+                    <Pressable
+                      key={item.id}
+                      style={styles.recentItem}
+                      onPress={() => router.push({ pathname: '/modal/place-detail', params: { id: item.id } })}
+                    >
+                      {item.imageURLs?.[0] ? (
+                        <Image source={{ uri: item.imageURLs[0] }} style={styles.recentImage} />
+                      ) : (
+                        <View style={[styles.recentImage, styles.recentImageEmpty]}>
+                          <Ionicons name="image-outline" size={16} color={colors.text.tertiary} />
+                        </View>
+                      )}
+                      <View style={styles.recentInfo}>
+                        <Text style={styles.recentName} numberOfLines={1}>{item.name}</Text>
+                        <Text style={styles.recentLocation} numberOfLines={1}>
                           {item.city}, {item.country}
                         </Text>
                       </View>
-                      <View style={styles.placeFooter}>
-                        <View style={styles.ratingContainer}>
-                          <Ionicons
-                            name="star"
-                            size={11}
-                            color={colors.gold.primary}
-                          />
-                          <Text style={styles.ratingText}>{item.rating}</Text>
-                        </View>
-                        {item.createdByPhoto ? (
-                          <Image
-                            source={{ uri: item.createdByPhoto }}
-                            style={styles.friendAvatar}
-                          />
-                        ) : null}
-                      </View>
-                    </View>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            )}
-
-            {/* Recent Discoveries */}
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Recent Discoveries</Text>
-              {recentDiscoveries.length > 0 && (
-                <Pressable>
-                  <Text style={styles.seeAllText}>See All</Text>
-                </Pressable>
-              )}
-            </View>
-            {recentDiscoveries.length === 0 && !isLoading ? (
-              <View style={styles.emptySection}>
-                <View style={styles.emptyIconRingOuter}>
-                  <View style={styles.emptyIconCircle}>
-                    <Ionicons name="compass-outline" size={26} color={colors.gold.muted} />
-                  </View>
-                </View>
-                <Text style={styles.emptyTitle}>No discoveries yet</Text>
-                <Text style={styles.emptySubtitle}>
-                  Add your first place from the map to get started
-                </Text>
-                <Pressable
-                  style={styles.emptyActionButton}
-                  onPress={() => router.push('/(tabs)/map')}
-                >
-                  <Ionicons name="map-outline" size={14} color={colors.background.primary} />
-                  <Text style={styles.emptyActionText}>Open Map</Text>
-                </Pressable>
-              </View>
-            ) : (
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.cardList}
-              >
-                {recentDiscoveries.map((item) => (
-                  <Pressable
-                    key={item.id}
-                    style={styles.placeCard}
-                    onPress={() => router.push({ pathname: '/modal/place-detail', params: { id: item.id } })}
-                  >
-                    <Image
-                      source={{
-                        uri:
-                          item.imageURLs?.[0] ||
-                          `https://picsum.photos/400/300?random=${item.id}`,
-                      }}
-                      style={styles.placeImage}
-                    />
-                    <View style={styles.cardBrassLine} />
-                    <View style={styles.placeCardContent}>
-                      <Text style={styles.placeName} numberOfLines={1}>
-                        {item.name}
-                      </Text>
                       <View
                         style={[
-                          styles.pill,
-                          {
-                            backgroundColor:
-                              categoryColors[item.category] + '14',
-                            borderColor:
-                              categoryColors[item.category] + '30',
-                          },
+                          styles.recentCategoryDot,
+                          { backgroundColor: categoryColors[item.category] },
                         ]}
-                      >
-                        <Text
-                          style={[
-                            styles.pillText,
-                            { color: categoryColors[item.category] },
-                          ]}
-                        >
-                          {item.subcategory || item.category}
-                        </Text>
-                      </View>
-                      <View style={styles.placeLocation}>
-                        <Ionicons
-                          name="location-outline"
-                          size={11}
-                          color={colors.text.tertiary}
-                        />
-                        <Text style={styles.locationText}>
-                          {item.city}, {item.country}
-                        </Text>
-                      </View>
-                      <View style={styles.placeFooter}>
-                        <View style={styles.ratingContainer}>
-                          <Ionicons
-                            name="star"
-                            size={11}
-                            color={colors.gold.primary}
-                          />
-                          <Text style={styles.ratingText}>{item.rating}</Text>
-                        </View>
-                      </View>
-                    </View>
-                  </Pressable>
-                ))}
-              </ScrollView>
+                      />
+                    </Pressable>
+                  ))}
+                </View>
+              </>
             )}
 
             <View style={{ height: spacing.xxl }} />
@@ -1195,6 +1001,52 @@ const styles = StyleSheet.create({
     borderRadius: 11,
     borderWidth: 1,
     borderColor: colors.gold.muted,
+  },
+
+  // ─── Recently Added (compact list) ──────────────────────────────
+  recentList: {
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.xxl,
+    gap: 1,
+  },
+  recentItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: 0.5,
+    borderBottomColor: colors.ui.border,
+    gap: spacing.md,
+  },
+  recentImage: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.sm,
+    backgroundColor: colors.background.tertiary,
+  },
+  recentImageEmpty: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 0.5,
+    borderColor: colors.ui.border,
+  },
+  recentInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  recentName: {
+    fontFamily: fonts.serif.bold,
+    fontSize: 14,
+    color: colors.text.primary,
+  },
+  recentLocation: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 11,
+    color: colors.text.tertiary,
+  },
+  recentCategoryDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
 
   // ─── Empty States ─────────────────────────────────────────────────

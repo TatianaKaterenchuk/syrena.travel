@@ -19,7 +19,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
 import { colors, fonts, spacing, radius, shadows } from '../../src/theme';
 import { PlaceCategory, Place } from '../../src/types';
-import { usePlacesStore, useMapStore } from '../../src/stores';
+import { usePlacesStore, useMapStore, useFriendsStore } from '../../src/stores';
 import { useLocation } from '../../src/hooks';
 import { CUSTOM_MAP_STYLE, CLUSTER_RADIUS } from '../../src/constants/mapConfig';
 import {
@@ -548,6 +548,7 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
     setSearchExpanded(false);
     setSearchQuery('');
     setSearchResults([]);
+    setLocalMatches([]);
     setIsSearching(false);
     setLongPressCoordinate(null);
     Keyboard.dismiss();
@@ -565,6 +566,9 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
     }
   };
 
+  // Local saved places matching the search query
+  const [localMatches, setLocalMatches] = useState<Place[]>([]);
+
   const handleSearchQueryChange = (text: string) => {
     setSearchQuery(text);
     setSearchMode('text');
@@ -573,9 +577,21 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
 
     if (text.trim().length < 2) {
       setSearchResults([]);
+      setLocalMatches([]);
       setIsSearching(false);
       return;
     }
+
+    // Immediately filter saved places by name, city, country, or tags
+    const q = text.trim().toLowerCase();
+    const matched = places.filter(
+      (p) =>
+        p.name.toLowerCase().includes(q) ||
+        p.city?.toLowerCase().includes(q) ||
+        p.country?.toLowerCase().includes(q) ||
+        p.tags?.some((t) => t.toLowerCase().includes(q)),
+    );
+    setLocalMatches(matched.slice(0, 5));
 
     setIsSearching(true);
     debounceRef.current = setTimeout(async () => {
@@ -762,7 +778,7 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
         {...(isGoogleMapsAvailable ? { provider: PROVIDER_GOOGLE } : {})}
         showsUserLocation
         showsMyLocationButton={false}
-        showsPointsOfInterest={true}
+        showsPointsOfInterest={false}
         userInterfaceStyle="dark"
         customMapStyle={isGoogleMapsAvailable ? CUSTOM_MAP_STYLE : undefined}
         onLongPress={handleLongPress}
@@ -841,8 +857,50 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
             </Pressable>
           </View>
 
+          {/* Saved place matches */}
+          {localMatches.length > 0 && searchMode === 'text' && (
+            <>
+              <Text style={styles.searchResultsLabel}>YOUR PLACES</Text>
+              {localMatches.map((p) => (
+                <Pressable
+                  key={p.id}
+                  style={styles.searchResultRow}
+                  onPress={() => {
+                    dismissSearch();
+                    setSelectedPlace(p);
+                    const lat = p.location?.latitude ?? 0;
+                    const lng = p.location?.longitude ?? 0;
+                    if (lat && lng) {
+                      mapRef.current?.animateToRegion(
+                        { latitude: lat, longitude: lng, latitudeDelta: 0.01, longitudeDelta: 0.01 },
+                        350,
+                      );
+                    }
+                  }}
+                >
+                  {p.imageURLs?.[0] ? (
+                    <Image source={{ uri: p.imageURLs[0] }} style={styles.searchResultImage} />
+                  ) : (
+                    <View style={[styles.searchResultImage, styles.searchResultImagePlaceholder]}>
+                      <Ionicons name="location" size={18} color={colors.text.tertiary} />
+                    </View>
+                  )}
+                  <View style={styles.searchResultInfo}>
+                    <Text style={styles.searchResultName} numberOfLines={1}>{p.name}</Text>
+                    <View style={styles.searchResultMeta}>
+                      <View style={[styles.searchResultDot, { backgroundColor: categoryColors[p.category] || colors.gold.primary }]} />
+                      <Text style={styles.searchResultCategory}>{p.city || categoryLabels[p.category] || 'Place'}</Text>
+                    </View>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={colors.text.tertiary} />
+                </Pressable>
+              ))}
+              <View style={styles.searchResultSeparator} />
+            </>
+          )}
+
           {/* Results */}
-          {isSearching ? (
+          {isSearching && localMatches.length === 0 ? (
             <View style={styles.searchLoading}>
               <ActivityIndicator size="small" color={colors.gold.primary} />
               <Text style={styles.searchLoadingText}>
@@ -1039,14 +1097,19 @@ export default function MapScreen() {
   const [hintDismissed, setHintDismissed] = useState(false);
 
   const { places, fetchPlaces } = usePlacesStore();
-  const { activeFilters, activeBudgetFilters } = useMapStore();
+  const { activeFilters, activeBudgetFilters, selectedFriendId, friendPlaceIds, clearFriendFilter } = useMapStore();
+  const { friends } = useFriendsStore();
   const { location, requestLocation } = useLocation();
+
+  const selectedFriend = selectedFriendId
+    ? friends.find((f) => f.uid === selectedFriendId)
+    : null;
 
   useEffect(() => {
     fetchPlaces();
   }, [fetchPlaces]);
 
-  // Filter places by active categories and budget tiers from the map filter store
+  // Filter places by active categories, budget tiers, and friend from the map filter store
   const filteredPlaces = useMemo(() => {
     if (activeFilters.length === 0) return [];
     let result = places;
@@ -1056,11 +1119,16 @@ export default function MapScreen() {
     if (activeBudgetFilters.length < 4 && activeBudgetFilters.length > 0) {
       result = result.filter((p) => !p.budgetTier || activeBudgetFilters.includes(p.budgetTier));
     }
+    if (selectedFriendId) {
+      if (friendPlaceIds.length === 0) return [];
+      const friendSet = new Set(friendPlaceIds);
+      result = result.filter((p) => friendSet.has(p.id));
+    }
     return result;
-  }, [places, activeFilters, activeBudgetFilters]);
+  }, [places, activeFilters, activeBudgetFilters, selectedFriendId, friendPlaceIds]);
 
   // Whether filters are actively narrowed
-  const hasActiveFilter = activeFilters.length < 8 && activeFilters.length > 0;
+  const hasActiveFilter = activeFilters.length < 8 && activeFilters.length > 0 || !!selectedFriendId;
 
   const goToCurrentLocation = useCallback(async () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -1127,6 +1195,23 @@ export default function MapScreen() {
           </Pressable>
         </View>
       </View>
+
+      {/* Friend filter bar */}
+      {selectedFriend && (
+        <View style={[styles.friendFilterBar, { top: insets.top + 52 }]}>
+          <Ionicons name="person" size={14} color={colors.gold.primary} />
+          <Text style={styles.friendFilterText} numberOfLines={1}>
+            {selectedFriend.displayName}'s picks
+          </Text>
+          <Pressable
+            onPress={clearFriendFilter}
+            hitSlop={8}
+            style={styles.friendFilterClear}
+          >
+            <Ionicons name="close" size={14} color={colors.text.primary} />
+          </Pressable>
+        </View>
+      )}
 
       {/* FABs — native only */}
       {Platform.OS !== 'web' && (
@@ -1196,6 +1281,34 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background.primary + 'DD',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  friendFilterBar: {
+    position: 'absolute',
+    left: spacing.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.full,
+    backgroundColor: colors.gold.primary + '25',
+    borderWidth: 1,
+    borderColor: colors.gold.primary + '50',
+  },
+  friendFilterText: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 12,
+    color: colors.gold.primary,
+    maxWidth: 160,
+  },
+  friendFilterClear: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.background.primary + 'AA',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 2,
   },
   headerTitle: {
     fontFamily: fonts.serif.bold,

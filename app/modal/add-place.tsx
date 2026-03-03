@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,8 @@ import {
   Image,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -24,7 +26,11 @@ import { useAuthStore } from '../../src/stores/useAuthStore';
 import { reverseGeocode } from '../../src/utils/geocoding';
 import {
   searchPlacePhotos,
+  searchPlaces as googleSearchPlaces,
+  getPlaceDetails,
+  mapGoogleTypesToCategory,
   PlacePhoto,
+  GooglePlaceSearchResult,
 } from '../../src/services/googlePlaces';
 import { useLocation } from '../../src/hooks/useLocation';
 import { generateTags, expandManualTags } from '../../src/utils/generateTags';
@@ -109,6 +115,94 @@ export default function AddPlaceModal() {
   const [remotePhotoUrls, setRemotePhotoUrls] = useState<Set<string>>(
     new Set(poiPhotoUrls),
   );
+
+  // ---------- Google Places autocomplete ----------
+  const [placeSuggestions, setPlaceSuggestions] = useState<GooglePlaceSearchResult[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [isSearchingSuggestions, setIsSearchingSuggestions] = useState(false);
+  const [selectedGooglePlaceId, setSelectedGooglePlaceId] = useState<string | null>(
+    params.googlePlaceId || null,
+  );
+  const [resolvedLat, setResolvedLat] = useState<number | null>(paramLat);
+  const [resolvedLng, setResolvedLng] = useState<number | null>(paramLng);
+  const suggestionDebounceRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleNameChange = useCallback((text: string) => {
+    setName(text);
+
+    // Don't search if we already have a POI or if text is too short
+    if (isPoiPrefilled || text.trim().length < 3) {
+      setPlaceSuggestions([]);
+      setShowSuggestions(false);
+      return;
+    }
+
+    setShowSuggestions(true);
+    if (suggestionDebounceRef.current) clearTimeout(suggestionDebounceRef.current);
+    suggestionDebounceRef.current = setTimeout(async () => {
+      setIsSearchingSuggestions(true);
+      try {
+        const results = await googleSearchPlaces(
+          text.trim(),
+          latitude ?? undefined,
+          longitude ?? undefined,
+          5,
+        );
+        setPlaceSuggestions(results);
+      } catch {
+        setPlaceSuggestions([]);
+      } finally {
+        setIsSearchingSuggestions(false);
+      }
+    }, 400);
+  }, [isPoiPrefilled, latitude, longitude]);
+
+  const handleSelectSuggestion = useCallback(async (suggestion: GooglePlaceSearchResult) => {
+    setShowSuggestions(false);
+    setPlaceSuggestions([]);
+    setName(suggestion.name);
+    setSelectedGooglePlaceId(suggestion.placeId);
+
+    // Set coordinates from the suggestion
+    setResolvedLat(suggestion.latitude);
+    setResolvedLng(suggestion.longitude);
+
+    // Set photos from suggestion
+    if (suggestion.photos.length > 0) {
+      const photoUrls = suggestion.photos.map((p) => p.url);
+      setPhotos(photoUrls);
+      setRemotePhotoUrls(new Set(photoUrls));
+    }
+
+    // Map category from types
+    const mappedCategory = mapGoogleTypesToCategory(suggestion.types, suggestion.primaryType);
+    if (mappedCategory) {
+      setSelectedCategory(mappedCategory as PlaceCategory);
+    }
+
+    // Fetch full details for address, city, country
+    try {
+      const details = await getPlaceDetails(suggestion.placeId);
+      if (details) {
+        setAddress(details.address || '');
+        setCity(details.city || '');
+        setCountry(details.country || '');
+        // Get more photos from details
+        if (details.photos.length > suggestion.photos.length) {
+          const detailPhotoUrls = details.photos.map((p) => p.url);
+          setPhotos(detailPhotoUrls);
+          setRemotePhotoUrls(new Set(detailPhotoUrls));
+        }
+      }
+    } catch {
+      // Address will be filled by suggestion.address
+      setAddress(suggestion.address || '');
+    }
+  }, []);
+
+  // Use resolved coordinates (from suggestion or params), falling back to user location
+  const finalLat = resolvedLat ?? latitude;
+  const finalLng = resolvedLng ?? longitude;
 
   // ---------- Auto-generated tags ----------
   const autoTags = useMemo(() => {
@@ -199,8 +293,8 @@ export default function AddPlaceModal() {
     try {
       const results = await searchPlacePhotos(
         query,
-        latitude ?? undefined,
-        longitude ?? undefined,
+        finalLat ?? undefined,
+        finalLng ?? undefined,
       );
       setSearchPhotos(results);
       if (results.length === 0) {
@@ -211,7 +305,7 @@ export default function AddPlaceModal() {
     } finally {
       setIsSearchingPhotos(false);
     }
-  }, [name, city, latitude, longitude]);
+  }, [name, city, finalLat, finalLng]);
 
   const toggleSearchPhoto = useCallback(
     (photo: PlacePhoto) => {
@@ -336,7 +430,7 @@ export default function AddPlaceModal() {
         description: description.trim(),
         category: selectedCategory,
         subcategory: '',
-        location: new GeoPoint(latitude ?? 0, longitude ?? 0),
+        location: new GeoPoint(finalLat ?? 0, finalLng ?? 0),
         address: address.trim(),
         city: city.trim(),
         country: country.trim(),
@@ -392,7 +486,7 @@ export default function AddPlaceModal() {
   };
 
   // ---------- Render ----------
-  const hasCoordinates = latitude != null && longitude != null;
+  const hasCoordinates = finalLat != null && finalLng != null;
 
   const renderSearchPhoto = ({ item }: { item: PlacePhoto }) => {
     const isSelected = selectedSearchIds.has(item.id);
@@ -419,7 +513,11 @@ export default function AddPlaceModal() {
   };
 
   return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
+    <KeyboardAvoidingView
+      style={[styles.container, { paddingTop: insets.top }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      keyboardVerticalOffset={0}
+    >
       {/* Header */}
       <View style={styles.header}>
         <Pressable onPress={() => router.back()} disabled={isSubmitting}>
@@ -441,6 +539,7 @@ export default function AddPlaceModal() {
 
       <ScrollView
         showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
         contentContainerStyle={[
           styles.scrollContent,
           { paddingBottom: insets.bottom + 20 },
@@ -481,7 +580,7 @@ export default function AddPlaceModal() {
           </View>
           {hasCoordinates ? (
             <Text style={styles.locationCoords}>
-              {latitude!.toFixed(5)}, {longitude!.toFixed(5)}
+              {finalLat!.toFixed(5)}, {finalLng!.toFixed(5)}
             </Text>
           ) : isLocationLoading ? (
             <View style={styles.locationLoadingRow}>
@@ -562,16 +661,63 @@ export default function AddPlaceModal() {
           />
         )}
 
-        {/* ---- Name ---- */}
+        {/* ---- Name (with Google Places autocomplete) ---- */}
         <Text style={styles.label}>NAME *</Text>
         <TextInput
           style={styles.input}
           value={name}
-          onChangeText={setName}
-          placeholder="e.g. Hotel & Spa Narvil"
+          onChangeText={handleNameChange}
+          placeholder="Search for a place..."
           placeholderTextColor={colors.text.tertiary}
           editable={!isSubmitting}
+          onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
         />
+        {/* Google Places suggestions */}
+        {showSuggestions && (
+          <View style={styles.suggestionsContainer}>
+            {isSearchingSuggestions ? (
+              <View style={styles.suggestionLoading}>
+                <ActivityIndicator size="small" color={colors.gold.primary} />
+                <Text style={styles.suggestionLoadingText}>Searching...</Text>
+              </View>
+            ) : placeSuggestions.length > 0 ? (
+              placeSuggestions.map((s) => (
+                <Pressable
+                  key={s.placeId}
+                  style={styles.suggestionRow}
+                  onPress={() => handleSelectSuggestion(s)}
+                >
+                  {s.photos[0] ? (
+                    <Image source={{ uri: s.photos[0].url }} style={styles.suggestionPhoto} />
+                  ) : (
+                    <View style={[styles.suggestionPhoto, styles.suggestionPhotoEmpty]}>
+                      <Ionicons name="location" size={14} color={colors.gold.muted} />
+                    </View>
+                  )}
+                  <View style={styles.suggestionInfo}>
+                    <Text style={styles.suggestionName} numberOfLines={1}>{s.name}</Text>
+                    <Text style={styles.suggestionAddress} numberOfLines={1}>{s.address}</Text>
+                    {s.rating > 0 && (
+                      <View style={styles.suggestionRatingRow}>
+                        <Ionicons name="star" size={10} color={colors.gold.primary} />
+                        <Text style={styles.suggestionRating}>{s.rating.toFixed(1)}</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={colors.text.tertiary} />
+                </Pressable>
+              ))
+            ) : name.trim().length >= 3 ? (
+              <Text style={styles.suggestionEmpty}>No places found</Text>
+            ) : null}
+          </View>
+        )}
+        {selectedGooglePlaceId && (
+          <View style={styles.linkedPlaceIndicator}>
+            <Ionicons name="checkmark-circle" size={14} color={colors.ui.success} />
+            <Text style={styles.linkedPlaceText}>Linked to Google Maps</Text>
+          </View>
+        )}
 
         {/* ---- Category ---- */}
         <Text style={styles.label}>CATEGORY *</Text>
@@ -737,7 +883,7 @@ export default function AddPlaceModal() {
           <Text style={styles.loadingText}>Saving place...</Text>
         </View>
       )}
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -1109,6 +1255,92 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     marginLeft: 22,
     letterSpacing: 0.3,
+  },
+
+  // Google Places autocomplete suggestions
+  suggestionsContainer: {
+    backgroundColor: colors.background.tertiary,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.gold.muted + '40',
+    overflow: 'hidden',
+    marginTop: -spacing.sm,
+  },
+  suggestionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: 0.5,
+    borderBottomColor: colors.ui.border,
+    gap: spacing.sm,
+  },
+  suggestionPhoto: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.sm,
+    backgroundColor: colors.background.primary,
+  },
+  suggestionPhotoEmpty: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 0.5,
+    borderColor: colors.ui.border,
+  },
+  suggestionInfo: {
+    flex: 1,
+    gap: 2,
+  },
+  suggestionName: {
+    fontFamily: fonts.serif.bold,
+    fontSize: 14,
+    color: colors.text.primary,
+  },
+  suggestionAddress: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 11,
+    color: colors.text.tertiary,
+  },
+  suggestionRatingRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  suggestionRating: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 11,
+    color: colors.gold.primary,
+  },
+  suggestionLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  suggestionLoadingText: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 12,
+    color: colors.text.tertiary,
+  },
+  suggestionEmpty: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 12,
+    color: colors.text.tertiary,
+    textAlign: 'center',
+    paddingVertical: spacing.md,
+  },
+  linkedPlaceIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginTop: spacing.xs,
+  },
+  linkedPlaceText: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 11,
+    color: colors.ui.success,
+    letterSpacing: 0.5,
   },
 
   // Loading overlay
