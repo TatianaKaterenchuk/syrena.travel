@@ -104,10 +104,14 @@ function PlaceCard({
   place,
   onPress,
   onClose,
+  hasBeen,
+  onToggleBeen,
 }: {
   place: Place;
   onPress: () => void;
   onClose: () => void;
+  hasBeen: boolean;
+  onToggleBeen: () => void;
 }) {
   const slideAnim = useRef(new Animated.Value(200)).current;
 
@@ -174,25 +178,53 @@ function PlaceCard({
               </Text>
             </View>
           ) : null}
-          {/* Rating stars — Michelin Guide style */}
-          {place.rating > 0 && (
-            <View style={styles.cardRow}>
-              <Ionicons
-                name="star"
-                size={12}
-                color={hasHighRating ? colors.gold.primary : colors.text.tertiary}
-              />
-              <Text
-                style={[
-                  styles.cardRating,
-                  hasHighRating && { color: colors.gold.primary },
-                ]}
-              >
-                {place.rating.toFixed(1)}
-              </Text>
-            </View>
-          )}
+          {/* Rating + Been row */}
+          <View style={styles.cardRow}>
+            {place.rating > 0 && (
+              <>
+                <Ionicons
+                  name="star"
+                  size={12}
+                  color={hasHighRating ? colors.gold.primary : colors.text.tertiary}
+                />
+                <Text
+                  style={[
+                    styles.cardRating,
+                    hasHighRating && { color: colors.gold.primary },
+                  ]}
+                >
+                  {place.rating.toFixed(1)}
+                </Text>
+              </>
+            )}
+            {(place.beenCount || 0) > 0 && (
+              <>
+                <Text style={styles.cardBeenDot}> · </Text>
+                <Ionicons name="checkmark-circle" size={11} color={colors.text.tertiary} />
+                <Text style={styles.cardBeenCount}>{place.beenCount} been</Text>
+              </>
+            )}
+          </View>
         </View>
+
+        {/* Been button */}
+        <Pressable
+          style={[styles.cardBeenButton, hasBeen && styles.cardBeenButtonActive]}
+          onPress={(e) => {
+            e.stopPropagation();
+            onToggleBeen();
+          }}
+          hitSlop={4}
+        >
+          <Ionicons
+            name={hasBeen ? 'checkmark-circle' : 'checkmark-circle-outline'}
+            size={16}
+            color={hasBeen ? colors.gold.primary : colors.text.tertiary}
+          />
+          <Text style={[styles.cardBeenText, hasBeen && styles.cardBeenTextActive]}>
+            Been
+          </Text>
+        </Pressable>
 
         {/* Chevron */}
         <View style={styles.cardChevron}>
@@ -439,6 +471,7 @@ interface NativeMapProps {
 function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
+  const { beenPlaceIds, toggleBeen } = usePlacesStore();
   const [selectedPlace, setSelectedPlace] = useState<Place | null>(null);
   const [tempMarker, setTempMarker] = useState<{
     latitude: number;
@@ -1063,6 +1096,8 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
             place={selectedPlace}
             onPress={handleCardPress}
             onClose={handleCardClose}
+            hasBeen={beenPlaceIds.includes(selectedPlace.id)}
+            onToggleBeen={() => toggleBeen(selectedPlace.id)}
           />
         </View>
       )}
@@ -1096,7 +1131,7 @@ export default function MapScreen() {
   const mapRef = useRef<any>(null);
   const [hintDismissed, setHintDismissed] = useState(false);
 
-  const { places, fetchPlaces } = usePlacesStore();
+  const { places, beenPlaceIds, fetchPlaces, fetchBeenPlaces, toggleBeen } = usePlacesStore();
   const { activeFilters, activeBudgetFilters, selectedFriendId, friendPlaceIds, clearFriendFilter } = useMapStore();
   const { friends } = useFriendsStore();
   const { location, requestLocation } = useLocation();
@@ -1107,6 +1142,7 @@ export default function MapScreen() {
 
   useEffect(() => {
     fetchPlaces();
+    fetchBeenPlaces();
   }, [fetchPlaces]);
 
   // Filter places by active categories, budget tiers, and friend from the map filter store
@@ -1505,6 +1541,42 @@ const styles = StyleSheet.create({
     fontFamily: fonts.sans.medium,
     fontSize: 12,
     color: colors.text.tertiary,
+  },
+  cardBeenDot: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 11,
+    color: colors.text.tertiary,
+  },
+  cardBeenCount: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 11,
+    color: colors.text.tertiary,
+    marginLeft: 2,
+  },
+  cardBeenButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: radius.sm,
+    borderWidth: 0.5,
+    borderColor: colors.ui.border,
+    alignSelf: 'center',
+  },
+  cardBeenButtonActive: {
+    borderColor: colors.gold.primary + '50',
+    backgroundColor: colors.gold.primary + '10',
+  },
+  cardBeenText: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 10,
+    color: colors.text.tertiary,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  cardBeenTextActive: {
+    color: colors.gold.primary,
   },
   cardChevron: {
     paddingRight: spacing.xs,

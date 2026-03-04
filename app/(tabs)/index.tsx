@@ -107,12 +107,14 @@ export default function ExploreScreen() {
     isLoading,
     fetchPlaces,
     fetchFeaturedPerson,
+    fetchBeenPlaces,
     searchPlacesWithMatchedTags,
   } = usePlacesStore();
 
   useEffect(() => {
     fetchPlaces();
     fetchFeaturedPerson();
+    fetchBeenPlaces();
   }, []);
 
   const handleSearch = useCallback(
@@ -135,6 +137,41 @@ export default function ExploreScreen() {
       handleSearch(searchParam);
     }
   }, [searchParam]);
+
+  const { userPlaces } = usePlacesStore();
+
+  // Derive "Best of [City]" — pick the city with the most places (min 2)
+  const bestOfCity = useMemo(() => {
+    const cityMap = new Map<string, typeof places>();
+    for (const p of places) {
+      if (!p.city) continue;
+      const existing = cityMap.get(p.city) || [];
+      existing.push(p);
+      cityMap.set(p.city, existing);
+    }
+    let topCity = '';
+    let topPlaces: typeof places = [];
+    for (const [city, cityPlaces] of cityMap) {
+      if (cityPlaces.length > topPlaces.length) {
+        topCity = city;
+        topPlaces = cityPlaces;
+      }
+    }
+    if (topPlaces.length < 2) return null;
+    // Sort by rating desc
+    const sorted = [...topPlaces].sort((a, b) => b.rating - a.rating).slice(0, 8);
+    return { city: topCity, places: sorted };
+  }, [places]);
+
+  // Derive user's favorites
+  const myFavorites = useMemo(() => {
+    const favIds = userPlaces
+      .filter((up) => up.isFavorite)
+      .map((up) => up.placeId);
+    if (favIds.length === 0) return [];
+    const favSet = new Set(favIds);
+    return places.filter((p) => favSet.has(p.id)).slice(0, 8);
+  }, [places, userPlaces]);
 
   const placesCount = places.length;
   const isAdmin = profile?.isAdmin === true;
@@ -464,6 +501,118 @@ export default function ExploreScreen() {
               </>
             )}
 
+            {/* Best of [City] */}
+            {bestOfCity && (
+              <>
+                <View style={styles.sectionHeader}>
+                  <View style={styles.featuredTitleRow}>
+                    <Ionicons name="ribbon" size={16} color={colors.gold.primary} />
+                    <Text style={styles.sectionTitle}>Best of {bestOfCity.city}</Text>
+                  </View>
+                </View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.cardList}
+                >
+                  {bestOfCity.places.map((item) => (
+                    <Pressable
+                      key={item.id}
+                      style={styles.bestOfCard}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/modal/place-detail',
+                          params: { id: item.id },
+                        })
+                      }
+                    >
+                      {item.imageURLs?.[0] ? (
+                        <Image
+                          source={{ uri: item.imageURLs[0] }}
+                          style={styles.bestOfImage}
+                        />
+                      ) : (
+                        <View style={[styles.bestOfImage, styles.bestOfImageEmpty]}>
+                          <Ionicons name="image-outline" size={20} color={colors.text.tertiary} />
+                        </View>
+                      )}
+                      <View style={styles.bestOfOverlay}>
+                        <View style={styles.bestOfRating}>
+                          <Ionicons name="star" size={10} color={colors.gold.primary} />
+                          <Text style={styles.bestOfRatingText}>{item.rating}</Text>
+                        </View>
+                      </View>
+                      <View style={styles.bestOfContent}>
+                        <Text style={styles.bestOfName} numberOfLines={1}>{item.name}</Text>
+                        <Text style={styles.bestOfCategory}>
+                          {item.subcategory || item.category}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </>
+            )}
+
+            {/* Your Favorites */}
+            {myFavorites.length > 0 && (
+              <>
+                <View style={styles.sectionHeader}>
+                  <View style={styles.featuredTitleRow}>
+                    <Ionicons name="heart" size={16} color={colors.gold.primary} />
+                    <Text style={styles.sectionTitle}>Your Favorites</Text>
+                  </View>
+                </View>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.recentCardList}
+                >
+                  {myFavorites.map((item) => (
+                    <Pressable
+                      key={item.id}
+                      style={styles.recentCard}
+                      onPress={() =>
+                        router.push({
+                          pathname: '/modal/place-detail',
+                          params: { id: item.id },
+                        })
+                      }
+                    >
+                      {item.imageURLs?.[0] ? (
+                        <Image source={{ uri: item.imageURLs[0] }} style={styles.recentCardImage} />
+                      ) : (
+                        <View style={[styles.recentCardImage, styles.recentCardImageEmpty]}>
+                          <Ionicons name="image-outline" size={22} color={colors.text.tertiary} />
+                        </View>
+                      )}
+                      <View style={styles.recentCardOverlay}>
+                        <View
+                          style={[
+                            styles.recentCategoryBadge,
+                            { backgroundColor: categoryColors[item.category] },
+                          ]}
+                        >
+                          <Text style={styles.recentCategoryBadgeText}>
+                            {(item.subcategory || item.category).toUpperCase()}
+                          </Text>
+                        </View>
+                      </View>
+                      <View style={styles.recentCardContent}>
+                        <Text style={styles.recentCardName} numberOfLines={1}>{item.name}</Text>
+                        <View style={styles.recentCardLocation}>
+                          <Ionicons name="location-outline" size={10} color={colors.text.tertiary} />
+                          <Text style={styles.recentCardLocationText} numberOfLines={1}>
+                            {item.city}, {item.country}
+                          </Text>
+                        </View>
+                      </View>
+                    </Pressable>
+                  ))}
+                </ScrollView>
+              </>
+            )}
+
             {/* Loading */}
             {isLoading && places.length === 0 && (
               <ActivityIndicator
@@ -473,41 +622,60 @@ export default function ExploreScreen() {
               />
             )}
 
-            {/* Recently Added — compact list */}
+            {/* Recent Discoveries */}
             {recentDiscoveries.length > 0 && (
               <>
                 <View style={styles.sectionHeader}>
-                  <Text style={styles.sectionTitle}>Recently Added</Text>
+                  <View style={styles.featuredTitleRow}>
+                    <Ionicons name="compass" size={16} color={colors.gold.primary} />
+                    <Text style={styles.sectionTitle}>Recent Discoveries</Text>
+                  </View>
                 </View>
-                <View style={styles.recentList}>
-                  {recentDiscoveries.map((item) => (
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.recentCardList}
+                >
+                  {recentDiscoveries.map((item, index) => (
                     <Pressable
                       key={item.id}
-                      style={styles.recentItem}
+                      style={[
+                        styles.recentCard,
+                        index === 0 && styles.recentCardFirst,
+                      ]}
                       onPress={() => router.push({ pathname: '/modal/place-detail', params: { id: item.id } })}
                     >
                       {item.imageURLs?.[0] ? (
-                        <Image source={{ uri: item.imageURLs[0] }} style={styles.recentImage} />
+                        <Image source={{ uri: item.imageURLs[0] }} style={styles.recentCardImage} />
                       ) : (
-                        <View style={[styles.recentImage, styles.recentImageEmpty]}>
-                          <Ionicons name="image-outline" size={16} color={colors.text.tertiary} />
+                        <View style={[styles.recentCardImage, styles.recentCardImageEmpty]}>
+                          <Ionicons name="image-outline" size={22} color={colors.text.tertiary} />
                         </View>
                       )}
-                      <View style={styles.recentInfo}>
-                        <Text style={styles.recentName} numberOfLines={1}>{item.name}</Text>
-                        <Text style={styles.recentLocation} numberOfLines={1}>
-                          {item.city}, {item.country}
-                        </Text>
+                      <View style={styles.recentCardOverlay}>
+                        <View
+                          style={[
+                            styles.recentCategoryBadge,
+                            { backgroundColor: categoryColors[item.category] },
+                          ]}
+                        >
+                          <Text style={styles.recentCategoryBadgeText}>
+                            {(item.subcategory || item.category).toUpperCase()}
+                          </Text>
+                        </View>
                       </View>
-                      <View
-                        style={[
-                          styles.recentCategoryDot,
-                          { backgroundColor: categoryColors[item.category] },
-                        ]}
-                      />
+                      <View style={styles.recentCardContent}>
+                        <Text style={styles.recentCardName} numberOfLines={1}>{item.name}</Text>
+                        <View style={styles.recentCardLocation}>
+                          <Ionicons name="location-outline" size={10} color={colors.text.tertiary} />
+                          <Text style={styles.recentCardLocationText} numberOfLines={1}>
+                            {item.city}, {item.country}
+                          </Text>
+                        </View>
+                      </View>
                     </Pressable>
                   ))}
-                </View>
+                </ScrollView>
               </>
             )}
 
@@ -1003,50 +1171,124 @@ const styles = StyleSheet.create({
     borderColor: colors.gold.muted,
   },
 
-  // ─── Recently Added (compact list) ──────────────────────────────
-  recentList: {
-    paddingHorizontal: spacing.lg,
+  // ─── Recent Discoveries (horizontal cards) ──────────────────────
+  recentCardList: {
+    paddingLeft: spacing.lg,
+    paddingRight: spacing.sm,
     marginBottom: spacing.xxl,
-    gap: 1,
-  },
-  recentItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.sm + 2,
-    borderBottomWidth: 0.5,
-    borderBottomColor: colors.ui.border,
     gap: spacing.md,
   },
-  recentImage: {
-    width: 40,
-    height: 40,
-    borderRadius: radius.sm,
+  recentCard: {
+    width: 155,
+    borderRadius: radius.lg,
+    backgroundColor: colors.ui.cardBg,
+    overflow: 'hidden',
+    ...shadows.sm,
+  },
+  recentCardFirst: {
+    width: 175,
+  },
+  recentCardImage: {
+    width: '100%',
+    height: 110,
     backgroundColor: colors.background.tertiary,
   },
-  recentImageEmpty: {
+  recentCardImageEmpty: {
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 0.5,
-    borderColor: colors.ui.border,
+    borderBottomWidth: 0.5,
+    borderBottomColor: colors.ui.border,
   },
-  recentInfo: {
-    flex: 1,
-    gap: 2,
+  recentCardOverlay: {
+    position: 'absolute',
+    top: spacing.sm,
+    left: spacing.sm,
   },
-  recentName: {
+  recentCategoryBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  recentCategoryBadgeText: {
+    fontFamily: fonts.sans.semiBold,
+    fontSize: 8,
+    color: '#fff',
+    letterSpacing: 0.8,
+  },
+  recentCardContent: {
+    padding: spacing.sm,
+    gap: 3,
+  },
+  recentCardName: {
     fontFamily: fonts.serif.bold,
-    fontSize: 14,
+    fontSize: 13,
     color: colors.text.primary,
+    letterSpacing: 0.2,
   },
-  recentLocation: {
+  recentCardLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  recentCardLocationText: {
     fontFamily: fonts.sans.regular,
-    fontSize: 11,
+    fontSize: 10,
     color: colors.text.tertiary,
   },
-  recentCategoryDot: {
-    width: 8,
-    height: 8,
+
+  // ─── Best of [City] cards ──────────────────────────────────────
+  bestOfCard: {
+    width: 140,
+    borderRadius: radius.lg,
+    backgroundColor: colors.ui.cardBg,
+    overflow: 'hidden',
+    ...shadows.sm,
+  },
+  bestOfImage: {
+    width: '100%',
+    height: 100,
+    backgroundColor: colors.background.tertiary,
+  },
+  bestOfImageEmpty: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderBottomWidth: 0.5,
+    borderBottomColor: colors.ui.border,
+  },
+  bestOfOverlay: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.sm,
+  },
+  bestOfRating: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    paddingHorizontal: 5,
+    paddingVertical: 2,
     borderRadius: 4,
+  },
+  bestOfRatingText: {
+    fontFamily: fonts.sans.semiBold,
+    fontSize: 10,
+    color: colors.gold.primary,
+  },
+  bestOfContent: {
+    padding: spacing.sm,
+    gap: 2,
+  },
+  bestOfName: {
+    fontFamily: fonts.serif.bold,
+    fontSize: 13,
+    color: colors.text.primary,
+    letterSpacing: 0.2,
+  },
+  bestOfCategory: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 10,
+    color: colors.text.tertiary,
+    textTransform: 'capitalize',
   },
 
   // ─── Empty States ─────────────────────────────────────────────────

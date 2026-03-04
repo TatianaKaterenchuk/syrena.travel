@@ -443,6 +443,7 @@ export default function AddPlaceModal() {
         rating: 0,
         ratingCount: 0,
         savesCount: 0,
+        beenCount: 0,
         tags: allTags,
         isPublic: true,
         ...(selectedBudget ? { budgetTier: selectedBudget } : {}),

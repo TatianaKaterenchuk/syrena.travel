@@ -53,7 +53,7 @@ export default function PlaceDetailModal() {
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const [reviews, setReviews] = useState<Review[]>([]);
 
-  const { places, userPlaces, savePlace, removePlace, toggleFavorite, toggleGoldStar, requestDeletion } = usePlacesStore();
+  const { places, userPlaces, beenPlaceIds, savePlace, removePlace, toggleFavorite, toggleGoldStar, toggleBeen, requestDeletion } = usePlacesStore();
   const scrollViewRef = useRef<ScrollView>(null);
   const { user, profile } = useAuthStore();
 
@@ -231,6 +231,11 @@ export default function PlaceDetailModal() {
       'default',
     );
   };
+
+  const hasBeen = useMemo(
+    () => id ? beenPlaceIds.includes(id) : false,
+    [beenPlaceIds, id],
+  );
 
   // Check if user already reviewed
   const hasReviewed = useMemo(
@@ -497,6 +502,19 @@ export default function PlaceDetailModal() {
             <Ionicons name="heart" size={16} color={colors.gold.primary} />
             <Text style={styles.statText}>{place.savesCount} saves</Text>
           </View>
+          <Pressable
+            style={[styles.statItem, styles.beenStatItem, hasBeen && styles.beenStatItemActive]}
+            onPress={() => id && toggleBeen(id)}
+          >
+            <Ionicons
+              name={hasBeen ? 'checkmark-circle' : 'checkmark-circle-outline'}
+              size={16}
+              color={hasBeen ? colors.gold.primary : colors.text.tertiary}
+            />
+            <Text style={[styles.statText, hasBeen && styles.beenStatTextActive]}>
+              {place.beenCount || 0} been
+            </Text>
+          </Pressable>
           <View style={styles.statItem}>
             <Ionicons
               name="chatbubble"
@@ -948,6 +966,20 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.text.secondary,
     letterSpacing: 0.5,
+  },
+  beenStatItem: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.sm,
+    borderWidth: 0.5,
+    borderColor: colors.ui.border,
+  },
+  beenStatItemActive: {
+    borderColor: colors.gold.primary + '50',
+    backgroundColor: colors.gold.primary + '10',
+  },
+  beenStatTextActive: {
+    color: colors.gold.primary,
   },
   // Reviews
   reviewsSection: {

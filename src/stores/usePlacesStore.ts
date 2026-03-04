@@ -25,6 +25,7 @@ interface PlacesState {
   recentDiscoveries: Place[];
   featuredPerson: FeaturedPerson | null;
   featuredPicks: Place[];
+  beenPlaceIds: string[];
   isLoading: boolean;
 }
 
@@ -54,6 +55,8 @@ interface PlacesActions {
   fetchPendingDeletionRequests: () => Promise<DeletionRequest[]>;
   approveDeletion: (request: DeletionRequest) => Promise<void>;
   rejectDeletion: (requestId: string) => Promise<void>;
+  fetchBeenPlaces: () => Promise<void>;
+  toggleBeen: (placeId: string) => Promise<void>;
 }
 
 // ---------------------------------------------------------------------------
@@ -69,6 +72,7 @@ export const usePlacesStore = create<PlacesState & PlacesActions>((set, get) => 
   recentDiscoveries: [],
   featuredPerson: null,
   featuredPicks: [],
+  beenPlaceIds: [],
   isLoading: false,
 
   // Actions
@@ -586,6 +590,95 @@ export const usePlacesStore = create<PlacesState & PlacesActions>((set, get) => 
     } catch (error) {
       console.error('Error rejecting deletion:', error);
       throw error;
+    }
+  },
+
+  // ---------------------------------------------------------------------------
+  // "Been" tracking
+  // ---------------------------------------------------------------------------
+
+  fetchBeenPlaces: async () => {
+    const userId = useAuthStore.getState().user?.uid;
+    if (!userId) {
+      set({ beenPlaceIds: [] });
+      return;
+    }
+    try {
+      const docs = await getDocuments<{ placeId: string }>('placeVisits', [
+        where('userId', '==', userId),
+      ]);
+      set({ beenPlaceIds: docs.map((d) => d.placeId) });
+    } catch (error) {
+      console.error('Error fetching been places:', error);
+    }
+  },
+
+  toggleBeen: async (placeId) => {
+    const userId = useAuthStore.getState().user?.uid;
+    if (!userId) return;
+
+    const { beenPlaceIds, places, recentDiscoveries } = get();
+    const alreadyBeen = beenPlaceIds.includes(placeId);
+
+    if (alreadyBeen) {
+      // Remove visit
+      set({ beenPlaceIds: beenPlaceIds.filter((id) => id !== placeId) });
+
+      // Decrement beenCount locally
+      const updateCount = (p: Place) =>
+        p.id === placeId ? { ...p, beenCount: Math.max(0, (p.beenCount || 0) - 1) } : p;
+      set((state) => ({
+        places: state.places.map(updateCount),
+        recentDiscoveries: state.recentDiscoveries.map(updateCount),
+      }));
+
+      try {
+        const matches = await getDocuments<{ id: string }>('placeVisits', [
+          where('userId', '==', userId),
+          where('placeId', '==', placeId),
+        ]);
+        if (matches.length > 0) {
+          await deleteDocument('placeVisits', matches[0].id);
+        }
+        const place = places.find((p) => p.id === placeId);
+        if (place) {
+          await updateDocument('places', placeId, {
+            beenCount: Math.max(0, (place.beenCount || 0) - 1),
+          });
+        }
+      } catch (error) {
+        console.error('Error removing visit:', error);
+        // Revert
+        set({ beenPlaceIds: [...beenPlaceIds] });
+      }
+    } else {
+      // Add visit
+      set({ beenPlaceIds: [...beenPlaceIds, placeId] });
+
+      // Increment beenCount locally
+      const updateCount = (p: Place) =>
+        p.id === placeId ? { ...p, beenCount: (p.beenCount || 0) + 1 } : p;
+      set((state) => ({
+        places: state.places.map(updateCount),
+        recentDiscoveries: state.recentDiscoveries.map(updateCount),
+      }));
+
+      try {
+        await createDocument('placeVisits', {
+          userId,
+          placeId,
+        });
+        const place = places.find((p) => p.id === placeId);
+        if (place) {
+          await updateDocument('places', placeId, {
+            beenCount: (place.beenCount || 0) + 1,
+          });
+        }
+      } catch (error) {
+        console.error('Error adding visit:', error);
+        // Revert
+        set({ beenPlaceIds: beenPlaceIds.filter((id) => id !== placeId) });
+      }
     }
   },
 }));

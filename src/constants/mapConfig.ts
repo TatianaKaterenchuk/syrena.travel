@@ -41,8 +41,13 @@ export const CUSTOM_MAP_STYLE = [
   },
   {
     featureType: 'administrative.land_parcel',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#4a5248' }],
+    elementType: 'labels',
+    stylers: [{ visibility: 'off' }],
+  },
+  {
+    featureType: 'administrative.neighborhood',
+    elementType: 'labels',
+    stylers: [{ visibility: 'off' }],
   },
   {
     featureType: 'landscape.man_made',
@@ -91,23 +96,23 @@ export const CUSTOM_MAP_STYLE = [
   },
   {
     featureType: 'road',
-    elementType: 'labels.text.fill',
-    stylers: [{ color: '#4a4540' }],
-  },
-  {
-    featureType: 'road.local',
     elementType: 'labels',
     stylers: [{ visibility: 'off' }],
   },
   {
     featureType: 'road.highway',
     elementType: 'geometry',
-    stylers: [{ color: '#283530' }],
+    stylers: [{ color: '#1e2824' }],
   },
   {
     featureType: 'road.highway',
     elementType: 'geometry.stroke',
-    stylers: [{ color: '#303b35' }],
+    stylers: [{ visibility: 'off' }],
+  },
+  {
+    featureType: 'road.highway',
+    elementType: 'labels.icon',
+    stylers: [{ visibility: 'off' }],
   },
   {
     featureType: 'transit',

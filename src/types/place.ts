@@ -46,6 +46,7 @@ export interface Place {
   rating: number;
   ratingCount: number;
   savesCount: number;
+  beenCount: number;
   tags: string[];
   isPublic: boolean;
   budgetTier?: BudgetTier;
