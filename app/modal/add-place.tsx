@@ -36,11 +36,11 @@ import { useLocation } from '../../src/hooks/useLocation';
 import { generateTags, expandManualTags } from '../../src/utils/generateTags';
 
 const CATEGORIES: { key: PlaceCategory; label: string; emoji: string }[] = [
-  { key: 'restaurant', label: 'Restaurant', emoji: '🍽️' },
-  { key: 'hotel', label: 'Hotel', emoji: '🏨' },
+  { key: 'restaurant', label: 'Eat', emoji: '🍽️' },
+  { key: 'hotel', label: 'Stay', emoji: '🏨' },
   { key: 'bar', label: 'Bar', emoji: '🍸' },
+  { key: 'culture', label: 'Do', emoji: '🎯' },
   { key: 'nature', label: 'Nature', emoji: '🌿' },
-  { key: 'culture', label: 'Culture', emoji: '🏛️' },
   { key: 'shopping', label: 'Shopping', emoji: '🛍️' },
   { key: 'services', label: 'Services', emoji: '🔧' },
 ];

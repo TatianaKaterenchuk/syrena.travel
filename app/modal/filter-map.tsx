@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, Image } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, Pressable, ScrollView, Image, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fonts, spacing, radius, shadows } from '../../src/theme';
-import { PlaceCategory, BudgetTier, BUDGET_LABELS, BUDGET_ICONS } from '../../src/types';
+import { PlaceCategory, BudgetTier, BUDGET_LABELS, BUDGET_ICONS, UserProfile } from '../../src/types';
 import { CATEGORIES } from '../../src/constants/categories';
-import { useMapStore, useFriendsStore } from '../../src/stores';
+import { useMapStore, useFriendsStore, useAuthStore } from '../../src/stores';
+import { FriendFilterMode } from '../../src/stores/useMapStore';
+import { getDocuments } from '../../src/services/firebase/firestore';
 
 const ALL_BUDGET_TIERS: BudgetTier[] = [1, 2, 3, 4];
 
@@ -16,9 +18,10 @@ export default function FilterMapModal() {
   const {
     activeFilters, toggleFilter, setAllFilters, clearFilters,
     activeBudgetFilters, toggleBudgetFilter, setAllBudgetFilters, clearBudgetFilters,
-    selectedFriendId, setFriendFilter, clearFriendFilter,
+    selectedFriendId, friendFilterMode, setFriendFilter, clearFriendFilter,
   } = useMapStore();
-  const { friends } = useFriendsStore();
+  const { friends, sentRequests } = useFriendsStore();
+  const user = useAuthStore((s) => s.user);
 
   // Local draft so changes only commit on "Apply"
   const [draft, setDraft] = useState<Set<PlaceCategory>>(
@@ -28,6 +31,35 @@ export default function FilterMapModal() {
     new Set(activeBudgetFilters),
   );
   const [friendDraft, setFriendDraft] = useState<string | null>(selectedFriendId);
+  const [modeDraft, setModeDraft] = useState<FriendFilterMode>(friendFilterMode);
+
+  // Suggested friends (non-friends on the app)
+  const [suggestedUsers, setSuggestedUsers] = useState<UserProfile[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+
+  useEffect(() => {
+    if (!user?.uid) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingSuggestions(true);
+      try {
+        const allUsers = await getDocuments<UserProfile>('users', []);
+        const friendUids = new Set(friends.map((f) => f.uid));
+        const suggested = allUsers.filter(
+          (u) =>
+            (u.uid || (u as any).id) !== user.uid &&
+            !friendUids.has(u.uid || (u as any).id) &&
+            u.status === 'approved',
+        );
+        if (!cancelled) setSuggestedUsers(suggested);
+      } catch (error) {
+        console.error('Error fetching suggested users:', error);
+      } finally {
+        if (!cancelled) setLoadingSuggestions(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.uid, friends.length]);
 
   const toggle = (key: PlaceCategory) => {
     setDraft((prev) => {
@@ -57,12 +89,14 @@ export default function FilterMapModal() {
     setDraft(new Set(CATEGORIES.map((c) => c.key)));
     setBudgetDraft(new Set(ALL_BUDGET_TIERS));
     setFriendDraft(null);
+    setModeDraft('all');
   };
 
   const clearAll = () => {
     setDraft(new Set());
     setBudgetDraft(new Set());
     setFriendDraft(null);
+    setModeDraft('all');
   };
 
   const allSelected = draft.size === CATEGORIES.length && budgetDraft.size === ALL_BUDGET_TIERS.length && !friendDraft;
@@ -103,13 +137,30 @@ export default function FilterMapModal() {
 
     // Sync friend filter
     if (friendDraft) {
-      setFriendFilter(friendDraft);
+      setFriendFilter(friendDraft, modeDraft);
     } else {
       clearFriendFilter();
     }
 
     router.back();
   };
+
+  const selectedFriendName = friendDraft
+    ? friends.find((f) => f.uid === friendDraft)?.displayName
+      || suggestedUsers.find((u) => (u.uid || (u as any).id) === friendDraft)?.displayName
+      || 'friend'
+    : null;
+
+  // All people to show: friends first, then suggestions
+  const allPeople = [
+    ...friends.map((f) => ({ uid: f.uid, displayName: f.displayName, photoURL: f.photoURL, isFriend: true })),
+    ...suggestedUsers.map((u) => ({
+      uid: u.uid || (u as any).id,
+      displayName: u.displayName,
+      photoURL: u.photoURL,
+      isFriend: false,
+    })),
+  ];
 
   return (
     <View style={styles.overlay}>
@@ -274,54 +325,144 @@ export default function FilterMapModal() {
           </View>
 
           {/* Friend Filter Section */}
-          {friends.length > 0 && (
-            <View style={styles.friendSection}>
-              <View style={styles.budgetHeader}>
-                <Ionicons name="people-outline" size={16} color={colors.gold.primary} />
-                <Text style={styles.budgetTitle}>By Friend</Text>
-              </View>
-              <Text style={styles.subtitle}>
-                {friendDraft
-                  ? `Showing ${friends.find((f) => f.uid === friendDraft)?.displayName || 'friend'}'s picks`
-                  : 'Show all — or tap a friend to filter'}
-              </Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.friendScroll}>
-                {friends.map((friend) => {
-                  const isActive = friendDraft === friend.uid;
-                  return (
-                    <Pressable
-                      key={friend.uid}
-                      onPress={() => setFriendDraft(isActive ? null : friend.uid)}
-                      style={[
-                        styles.friendChip,
-                        isActive && styles.friendChipActive,
-                      ]}
-                    >
-                      {friend.photoURL ? (
-                        <Image source={{ uri: friend.photoURL }} style={styles.friendChipAvatar} />
-                      ) : (
-                        <View style={[styles.friendChipAvatar, styles.friendChipAvatarFallback]}>
-                          <Ionicons name="person" size={14} color={colors.text.tertiary} />
-                        </View>
-                      )}
-                      <Text
-                        style={[
-                          styles.friendChipName,
-                          isActive && styles.friendChipNameActive,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {friend.displayName?.split(' ')[0] || 'Friend'}
-                      </Text>
-                      {isActive && (
-                        <Ionicons name="checkmark-circle" size={14} color={colors.gold.primary} />
-                      )}
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
+          <View style={styles.friendSection}>
+            <View style={styles.budgetHeader}>
+              <Ionicons name="people-outline" size={16} color={colors.gold.primary} />
+              <Text style={styles.budgetTitle}>By Person</Text>
             </View>
-          )}
+            <Text style={styles.subtitle}>
+              {friendDraft
+                ? `Showing ${selectedFriendName}'s ${modeDraft === 'favorites' ? 'favorites' : 'picks'}`
+                : 'Tap a person to filter by their places'}
+            </Text>
+
+            {/* Mode toggle — only show when a friend is selected */}
+            {friendDraft && (
+              <View style={styles.modeRow}>
+                <Pressable
+                  style={[styles.modePill, modeDraft === 'all' && styles.modePillActive]}
+                  onPress={() => setModeDraft('all')}
+                >
+                  <Ionicons
+                    name="bookmark-outline"
+                    size={14}
+                    color={modeDraft === 'all' ? colors.gold.primary : colors.text.tertiary}
+                  />
+                  <Text style={[styles.modePillText, modeDraft === 'all' && styles.modePillTextActive]}>
+                    All Picks
+                  </Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.modePill, modeDraft === 'favorites' && styles.modePillActive]}
+                  onPress={() => setModeDraft('favorites')}
+                >
+                  <Ionicons
+                    name="star-outline"
+                    size={14}
+                    color={modeDraft === 'favorites' ? colors.gold.primary : colors.text.tertiary}
+                  />
+                  <Text style={[styles.modePillText, modeDraft === 'favorites' && styles.modePillTextActive]}>
+                    Favorites
+                  </Text>
+                </Pressable>
+              </View>
+            )}
+
+            {/* Friends */}
+            {friends.length > 0 && (
+              <>
+                <Text style={styles.friendSectionLabel}>FRIENDS</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.friendScroll}>
+                  {friends.map((friend) => {
+                    const isActive = friendDraft === friend.uid;
+                    return (
+                      <Pressable
+                        key={friend.uid}
+                        onPress={() => {
+                          setFriendDraft(isActive ? null : friend.uid);
+                          if (isActive) setModeDraft('all');
+                        }}
+                        style={[
+                          styles.friendChip,
+                          isActive && styles.friendChipActive,
+                        ]}
+                      >
+                        {friend.photoURL ? (
+                          <Image source={{ uri: friend.photoURL }} style={styles.friendChipAvatar} />
+                        ) : (
+                          <View style={[styles.friendChipAvatar, styles.friendChipAvatarFallback]}>
+                            <Ionicons name="person" size={14} color={colors.text.tertiary} />
+                          </View>
+                        )}
+                        <Text
+                          style={[
+                            styles.friendChipName,
+                            isActive && styles.friendChipNameActive,
+                          ]}
+                          numberOfLines={1}
+                        >
+                          {friend.displayName?.split(' ')[0] || 'Friend'}
+                        </Text>
+                        {isActive && (
+                          <Ionicons name="checkmark-circle" size={14} color={colors.gold.primary} />
+                        )}
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </>
+            )}
+
+            {/* Suggested People */}
+            {suggestedUsers.length > 0 && (
+              <>
+                <Text style={[styles.friendSectionLabel, { marginTop: spacing.md }]}>DISCOVER PEOPLE</Text>
+                {loadingSuggestions ? (
+                  <ActivityIndicator size="small" color={colors.gold.primary} style={{ marginVertical: spacing.md }} />
+                ) : (
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.friendScroll}>
+                    {suggestedUsers.slice(0, 12).map((u) => {
+                      const uid = u.uid || (u as any).id;
+                      const isActive = friendDraft === uid;
+                      return (
+                        <Pressable
+                          key={uid}
+                          onPress={() => {
+                            setFriendDraft(isActive ? null : uid);
+                            if (isActive) setModeDraft('all');
+                          }}
+                          style={[
+                            styles.friendChip,
+                            isActive && styles.friendChipActive,
+                          ]}
+                        >
+                          {u.photoURL ? (
+                            <Image source={{ uri: u.photoURL }} style={styles.friendChipAvatar} />
+                          ) : (
+                            <View style={[styles.friendChipAvatar, styles.friendChipAvatarFallback]}>
+                              <Ionicons name="person" size={14} color={colors.text.tertiary} />
+                            </View>
+                          )}
+                          <Text
+                            style={[
+                              styles.friendChipName,
+                              isActive && styles.friendChipNameActive,
+                            ]}
+                            numberOfLines={1}
+                          >
+                            {u.displayName?.split(' ')[0] || 'User'}
+                          </Text>
+                          {isActive && (
+                            <Ionicons name="checkmark-circle" size={14} color={colors.gold.primary} />
+                          )}
+                        </Pressable>
+                      );
+                    })}
+                  </ScrollView>
+                )}
+              </>
+            )}
+          </View>
         </ScrollView>
 
         {/* Apply Button */}
@@ -562,6 +703,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.xl,
     marginBottom: spacing.xl,
   },
+  friendSectionLabel: {
+    fontFamily: fonts.sans.semiBold,
+    fontSize: 10,
+    color: colors.text.tertiary,
+    letterSpacing: 2,
+    marginBottom: spacing.sm,
+  },
   friendScroll: {
     flexDirection: 'row',
   },
@@ -598,6 +746,37 @@ const styles = StyleSheet.create({
     maxWidth: 80,
   },
   friendChipNameActive: {
+    color: colors.gold.primary,
+  },
+
+  /* Mode toggle */
+  modeRow: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  modePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.full,
+    borderWidth: 1,
+    borderColor: colors.ui.border,
+    backgroundColor: colors.ui.cardBg,
+  },
+  modePillActive: {
+    borderColor: colors.gold.primary + '55',
+    backgroundColor: colors.gold.primary + '18',
+  },
+  modePillText: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 12,
+    color: colors.text.tertiary,
+    letterSpacing: 0.3,
+  },
+  modePillTextActive: {
     color: colors.gold.primary,
   },
 

@@ -287,18 +287,6 @@ export default function PlaceDetailModal() {
           {isSaved && userPlace && (
             <Pressable
               style={styles.headerButton}
-              onPress={() => toggleGoldStar(userPlace.id)}
-            >
-              <Ionicons
-                name={userPlace.isGoldStar ? 'trophy' : 'trophy-outline'}
-                size={22}
-                color={userPlace.isGoldStar ? '#FFD700' : colors.text.primary}
-              />
-            </Pressable>
-          )}
-          {isSaved && userPlace && (
-            <Pressable
-              style={styles.headerButton}
               onPress={() => toggleFavorite(userPlace.id)}
             >
               <Ionicons
@@ -405,14 +393,6 @@ export default function PlaceDetailModal() {
               <Text style={styles.budgetLabel}>
                 {BUDGET_LABELS[place.budgetTier as BudgetTier]}
               </Text>
-            </View>
-          )}
-
-          {/* Gold Star Badge */}
-          {userPlace?.isGoldStar && (
-            <View style={styles.goldStarRow}>
-              <Ionicons name="trophy" size={16} color="#FFD700" />
-              <Text style={styles.goldStarText}>Best on Earth</Text>
             </View>
           )}
 
@@ -603,7 +583,7 @@ export default function PlaceDetailModal() {
           )}
           {reviews.map((review) => (
             <View key={review.id} style={styles.reviewCard}>
-              <View style={styles.reviewHeader}>
+              <Pressable style={styles.reviewHeader} onPress={() => router.push(`/modal/user-profile?id=${review.userId}`)}>
                 <Image
                   source={{ uri: review.userPhoto }}
                   style={styles.reviewAvatar}
@@ -626,7 +606,7 @@ export default function PlaceDetailModal() {
                     ? formatTimeAgo(review.createdAt)
                     : ''}
                 </Text>
-              </View>
+              </Pressable>
               <Text style={styles.reviewText}>{review.text}</Text>
             </View>
           ))}

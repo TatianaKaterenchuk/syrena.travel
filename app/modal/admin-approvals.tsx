@@ -282,13 +282,19 @@ export default function AdminApprovalsModal() {
     );
   };
 
+  // ── Helpers ──
+
+  const navigateToProfile = (uid: string) => {
+    router.push(`/modal/user-profile?id=${uid}`);
+  };
+
   // ── Renderers ──
 
   const renderUser = ({ item }: { item: UserProfile }) => (
     <View style={styles.card}>
       <View style={styles.cardBrass} />
       <View style={styles.cardContent}>
-        <View style={styles.userRow}>
+        <Pressable style={styles.userRow} onPress={() => navigateToProfile(item.uid || (item as any).id)}>
           <Image
             source={{ uri: item.photoURL || 'https://i.pravatar.cc/100?img=3' }}
             style={styles.userAvatar}
@@ -298,7 +304,7 @@ export default function AdminApprovalsModal() {
             <Text style={styles.userUsername}>@{item.username}</Text>
             <Text style={styles.userEmail}>{item.email}</Text>
           </View>
-        </View>
+        </Pressable>
         {/* About / Bio */}
         {item.bio ? (
           <View style={styles.userDetailSection}>
@@ -348,7 +354,7 @@ export default function AdminApprovalsModal() {
         <View style={styles.cardBrass} />
         <View style={styles.cardContent}>
           {/* Submitter + Place info */}
-          <View style={styles.userRow}>
+          <Pressable style={styles.userRow} onPress={() => navigateToProfile(item.submittedBy)}>
             <Image
               source={{ uri: item.submittedByPhoto || 'https://i.pravatar.cc/100?img=3' }}
               style={styles.userAvatar}
@@ -361,7 +367,7 @@ export default function AdminApprovalsModal() {
                 {item.placeName}
               </Text>
             </View>
-          </View>
+          </Pressable>
 
           {/* Changes diff */}
           <View style={styles.diffSection}>
@@ -415,7 +421,7 @@ export default function AdminApprovalsModal() {
     <View style={styles.card}>
       <View style={[styles.cardBrass, { backgroundColor: item.status === 'approved' ? colors.ui.success : colors.ui.error }]} />
       <View style={styles.cardContent}>
-        <View style={styles.userRow}>
+        <Pressable style={styles.userRow} onPress={() => navigateToProfile(item.uid || (item as any).id)}>
           <Image
             source={{ uri: item.photoURL || 'https://i.pravatar.cc/100?img=3' }}
             style={styles.userAvatar}
@@ -434,7 +440,7 @@ export default function AdminApprovalsModal() {
               {item.status === 'approved' ? 'APPROVED' : 'REJECTED'}
             </Text>
           </View>
-        </View>
+        </Pressable>
         <Text style={styles.historyDate}>{formatDate((item as any).updatedAt || (item as any).createdAt)}</Text>
       </View>
     </View>
@@ -446,7 +452,7 @@ export default function AdminApprovalsModal() {
       <View style={styles.card}>
         <View style={[styles.cardBrass, { backgroundColor: item.status === 'approved' ? colors.ui.success : colors.ui.error }]} />
         <View style={styles.cardContent}>
-          <View style={styles.userRow}>
+          <Pressable style={styles.userRow} onPress={() => navigateToProfile(item.submittedBy)}>
             <Image
               source={{ uri: item.submittedByPhoto || 'https://i.pravatar.cc/100?img=3' }}
               style={styles.userAvatar}
@@ -468,7 +474,7 @@ export default function AdminApprovalsModal() {
                 {item.status === 'approved' ? 'APPROVED' : 'REJECTED'}
               </Text>
             </View>
-          </View>
+          </Pressable>
           <View style={styles.diffSection}>
             {changedFields.map((field) => (
               <View key={field} style={styles.diffRow}>
@@ -497,7 +503,7 @@ export default function AdminApprovalsModal() {
     <View style={styles.card}>
       <View style={[styles.cardBrass, { backgroundColor: colors.ui.error }]} />
       <View style={styles.cardContent}>
-        <View style={styles.userRow}>
+        <Pressable style={styles.userRow} onPress={() => navigateToProfile(item.requestedBy)}>
           <Image
             source={{ uri: item.requestedByPhoto || 'https://i.pravatar.cc/100?img=3' }}
             style={styles.userAvatar}
@@ -509,7 +515,7 @@ export default function AdminApprovalsModal() {
               {'  '}{item.placeName}
             </Text>
           </View>
-        </View>
+        </Pressable>
         <View style={styles.userDetailSection}>
           <Text style={styles.userDetailLabel}>REASON</Text>
           <Text style={styles.userDetailValue}>{item.reason}</Text>

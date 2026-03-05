@@ -106,10 +106,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="guide"
         options={{
-          title: 'Guide',
-          tabBarIcon: ({ color, size, focused }) => (
-            <TabIcon name={focused ? 'book' : 'book-outline'} color={color} size={size} focused={focused} />
-          ),
+          href: null, // Hidden from tab bar
         }}
       />
       <Tabs.Screen

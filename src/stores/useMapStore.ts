@@ -30,6 +30,8 @@ const DEFAULT_REGION: Region = {
   longitudeDelta: 0.05,
 };
 
+export type FriendFilterMode = 'all' | 'favorites';
+
 interface MapState {
   region: Region;
   activeFilters: PlaceCategory[];
@@ -37,6 +39,7 @@ interface MapState {
   selectedPlaceId: string | null;
   isFilterModalVisible: boolean;
   selectedFriendId: string | null;
+  friendFilterMode: FriendFilterMode;
   friendPlaceIds: string[];
 }
 
@@ -50,7 +53,7 @@ interface MapActions {
   clearBudgetFilters: () => void;
   selectPlace: (placeId: string | null) => void;
   toggleFilterModal: () => void;
-  setFriendFilter: (friendUid: string) => Promise<void>;
+  setFriendFilter: (friendUid: string, mode?: FriendFilterMode) => Promise<void>;
   clearFriendFilter: () => void;
 }
 
@@ -62,6 +65,7 @@ export const useMapStore = create<MapState & MapActions>((set, get) => ({
   selectedPlaceId: null,
   isFilterModalVisible: false,
   selectedFriendId: null,
+  friendFilterMode: 'all',
   friendPlaceIds: [],
 
   // Actions
@@ -125,12 +129,14 @@ export const useMapStore = create<MapState & MapActions>((set, get) => ({
     }));
   },
 
-  setFriendFilter: async (friendUid: string) => {
-    set({ selectedFriendId: friendUid, friendPlaceIds: [] });
+  setFriendFilter: async (friendUid: string, mode: FriendFilterMode = 'all') => {
+    set({ selectedFriendId: friendUid, friendFilterMode: mode, friendPlaceIds: [] });
     try {
-      const userPlaces = await getDocuments<UserPlace>('userPlaces', [
-        where('userId', '==', friendUid),
-      ]);
+      const constraints = [where('userId', '==', friendUid)];
+      if (mode === 'favorites') {
+        constraints.push(where('isFavorite', '==', true));
+      }
+      const userPlaces = await getDocuments<UserPlace>('userPlaces', constraints);
       set({ friendPlaceIds: userPlaces.map((up) => up.placeId) });
     } catch (error) {
       console.error('Error fetching friend places:', error);
@@ -139,6 +145,6 @@ export const useMapStore = create<MapState & MapActions>((set, get) => ({
   },
 
   clearFriendFilter: () => {
-    set({ selectedFriendId: null, friendPlaceIds: [] });
+    set({ selectedFriendId: null, friendFilterMode: 'all', friendPlaceIds: [] });
   },
 }));

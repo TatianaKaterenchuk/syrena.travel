@@ -103,14 +103,10 @@ export default function FriendsScreen() {
       try {
         const allUsers = await getDocuments<UserProfile>('users', []);
         const friendUids = new Set(friends.map((f) => f.uid));
-        const pendingUids = new Set(sentRequests.map((r) => r.toUid));
-        const incomingUids = new Set(requests.map((r) => r.fromUid));
         const suggested = allUsers.filter(
           (u) =>
             (u.uid || (u as any).id) !== user.uid &&
             !friendUids.has(u.uid || (u as any).id) &&
-            !pendingUids.has(u.uid || (u as any).id) &&
-            !incomingUids.has(u.uid || (u as any).id) &&
             u.status === 'approved',
         );
         if (!cancelled) setSuggestions(suggested);

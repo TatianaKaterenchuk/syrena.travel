@@ -9,11 +9,11 @@ export interface CategoryConfig {
 }
 
 export const CATEGORIES: CategoryConfig[] = [
-  { key: 'restaurant', label: 'Restaurant', emoji: '🍽️', color: colors.category.restaurant },
-  { key: 'hotel', label: 'Hotel', emoji: '🏨', color: colors.category.hotel },
+  { key: 'restaurant', label: 'Eat', emoji: '🍽️', color: colors.category.restaurant },
+  { key: 'hotel', label: 'Stay', emoji: '🏨', color: colors.category.hotel },
   { key: 'bar', label: 'Bar', emoji: '🍸', color: colors.category.bar },
+  { key: 'culture', label: 'Do', emoji: '🎯', color: colors.category.culture },
   { key: 'nature', label: 'Nature', emoji: '🌿', color: colors.category.nature },
-  { key: 'culture', label: 'Culture', emoji: '🏛️', color: colors.category.culture },
   { key: 'shopping', label: 'Shopping', emoji: '🛍️', color: colors.category.shopping },
   { key: 'services', label: 'Services', emoji: '🔧', color: colors.category.services },
 ];

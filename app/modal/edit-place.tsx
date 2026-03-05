@@ -6,6 +6,7 @@ import {
   TextInput,
   Pressable,
   ScrollView,
+  Image,
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -25,17 +26,19 @@ import {
 import { usePlacesStore } from '../../src/stores/usePlacesStore';
 import { useAuthStore } from '../../src/stores/useAuthStore';
 import { generateTags } from '../../src/utils/generateTags';
+import { pickImage, takePhoto } from '../../src/utils/imagePicker';
+import { uploadImage } from '../../src/services/firebase/storage';
 
 // ---------------------------------------------------------------------------
 // Constants (same as add-place.tsx)
 // ---------------------------------------------------------------------------
 
 const CATEGORIES: { key: PlaceCategory; label: string; emoji: string }[] = [
-  { key: 'restaurant', label: 'Restaurant', emoji: '🍽️' },
-  { key: 'hotel', label: 'Hotel', emoji: '🏨' },
+  { key: 'restaurant', label: 'Eat', emoji: '🍽️' },
+  { key: 'hotel', label: 'Stay', emoji: '🏨' },
   { key: 'bar', label: 'Bar', emoji: '🍸' },
+  { key: 'culture', label: 'Do', emoji: '🎯' },
   { key: 'nature', label: 'Nature', emoji: '🌿' },
-  { key: 'culture', label: 'Culture', emoji: '🏛️' },
   { key: 'shopping', label: 'Shopping', emoji: '🛍️' },
   { key: 'services', label: 'Services', emoji: '🔧' },
 ];
@@ -77,7 +80,39 @@ export default function EditPlaceModal() {
   );
   const [manualTagInput, setManualTagInput] = useState('');
   const [manualTags, setManualTags] = useState<string[]>([]);
+  const [existingTags, setExistingTags] = useState<string[]>(place?.tags ?? []);
   const [isSaving, setIsSaving] = useState(false);
+
+  // Photo state
+  const [photos, setPhotos] = useState<string[]>(place?.imageURLs ?? []);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
+  const originalPhotoUrls = useMemo(() => new Set(place?.imageURLs ?? []), [place]);
+
+  const handlePickImage = async () => {
+    const uri = await pickImage();
+    if (uri) setPhotos((prev) => [...prev, uri]);
+  };
+
+  const handleTakePhoto = async () => {
+    const uri = await takePhoto();
+    if (uri) setPhotos((prev) => [...prev, uri]);
+  };
+
+  const handleRemovePhoto = (index: number) => {
+    setPhotos((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const handleAddPhoto = () => {
+    Alert.alert('Add Photo', 'Choose a source', [
+      { text: 'Camera', onPress: handleTakePhoto },
+      { text: 'Photo Library', onPress: handlePickImage },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const handleRemoveExistingTag = (tag: string) => {
+    setExistingTags((prev) => prev.filter((t) => t !== tag));
+  };
 
   const isEditMode = mode === 'edit';
   const title = isEditMode ? 'Edit Place' : 'Suggest Edit';
@@ -125,26 +160,24 @@ export default function EditPlaceModal() {
       original.budgetTier = place.budgetTier ?? null;
     }
 
-    // Re-generate tags if category/budget/city/country changed
-    if (changes.category || changes.budgetTier !== undefined || changes.city || changes.country) {
-      const newTags = generateTags({
+    // Check if tags were modified (removed existing or added new ones)
+    const tagsChanged =
+      existingTags.length !== place.tags.length ||
+      !existingTags.every((t) => place.tags.includes(t)) ||
+      manualTags.length > 0;
+
+    if (changes.category || changes.budgetTier !== undefined || changes.city || changes.country || tagsChanged) {
+      const newAutoTags = generateTags({
         category: selectedCategory,
         subcategory: subcategory.trim() || undefined,
         budgetTier: selectedBudget,
         city: city.trim() || undefined,
         country: country.trim() || undefined,
       });
-      // Merge manual tags
-      const allTags = Array.from(new Set([...newTags, ...manualTags]));
+      // Merge: auto-generated + surviving existing + new manual tags
+      const allTags = Array.from(new Set([...newAutoTags, ...existingTags, ...manualTags]));
       changes.tags = allTags;
       original.tags = place.tags;
-    } else if (manualTags.length > 0) {
-      // Only manual tags added
-      const allTags = Array.from(new Set([...place.tags, ...manualTags]));
-      if (allTags.length !== place.tags.length || !allTags.every((t) => place.tags.includes(t))) {
-        changes.tags = allTags;
-        original.tags = place.tags;
-      }
     }
 
     return { changes, original };
@@ -175,15 +208,45 @@ export default function EditPlaceModal() {
 
     const { changes, original } = computeChanges();
 
-    if (Object.keys(changes).length === 0) {
+    // Check if photos changed
+    const photosChanged =
+      photos.length !== (place.imageURLs?.length ?? 0) ||
+      !photos.every((p, i) => p === place.imageURLs?.[i]);
+
+    if (Object.keys(changes).length === 0 && !photosChanged) {
       Alert.alert('No Changes', 'No fields were modified.');
       return;
     }
 
     setIsSaving(true);
     try {
+      // Upload new photos if changed
+      let finalImageURLs: string[] | undefined;
+      if (photosChanged) {
+        setIsUploadingPhoto(true);
+        const uploadedURLs: string[] = [];
+        for (let i = 0; i < photos.length; i++) {
+          const photo = photos[i];
+          if (originalPhotoUrls.has(photo)) {
+            // Keep existing remote URL
+            uploadedURLs.push(photo);
+          } else {
+            // Upload new local file
+            const path = `places/${user.uid}/${Date.now()}_${i}.jpg`;
+            const url = await uploadImage(path, photo);
+            uploadedURLs.push(url);
+          }
+        }
+        finalImageURLs = uploadedURLs;
+        setIsUploadingPhoto(false);
+      }
+
       if (isEditMode) {
-        await updatePlace(place.id, changes);
+        const updateData = { ...changes };
+        if (finalImageURLs) {
+          (updateData as any).imageURLs = finalImageURLs;
+        }
+        await updatePlace(place.id, updateData);
         Alert.alert('Updated', 'Place has been updated.', [
           { text: 'OK', onPress: () => router.back() },
         ]);
@@ -208,6 +271,7 @@ export default function EditPlaceModal() {
       Alert.alert('Error', 'Could not save changes. Please try again.');
     } finally {
       setIsSaving(false);
+      setIsUploadingPhoto(false);
     }
   };
 
@@ -268,6 +332,38 @@ export default function EditPlaceModal() {
               : 'Changes will be submitted for admin review'}
           </Text>
         </View>
+
+        {/* ---- Photos ---- */}
+        <Text style={styles.label}>PHOTOS</Text>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          style={styles.photoScroll}
+          contentContainerStyle={styles.photoScrollContent}
+        >
+          {photos.map((uri, index) => (
+            <View key={`${uri}-${index}`} style={styles.photoThumb}>
+              <Image source={{ uri }} style={styles.photoImage} />
+              <Pressable
+                style={styles.photoRemoveBtn}
+                onPress={() => handleRemovePhoto(index)}
+                disabled={isSaving}
+              >
+                <Ionicons name="close-circle" size={22} color={colors.ui.error} />
+              </Pressable>
+            </View>
+          ))}
+          <Pressable style={styles.photoAddBtn} onPress={handleAddPhoto} disabled={isSaving}>
+            {isUploadingPhoto ? (
+              <ActivityIndicator size="small" color={colors.gold.primary} />
+            ) : (
+              <>
+                <Ionicons name="camera-outline" size={24} color={colors.gold.primary} />
+                <Text style={styles.photoAddText}>Add</Text>
+              </>
+            )}
+          </Pressable>
+        </ScrollView>
 
         {/* ---- Name ---- */}
         <Text style={styles.label}>NAME *</Text>
@@ -405,12 +501,18 @@ export default function EditPlaceModal() {
 
         {/* ---- Tags ---- */}
         <Text style={styles.label}>TAGS</Text>
-        {/* Existing auto-tags (read-only) */}
+        {/* Existing tags (removable) */}
         <View style={styles.tagsContainer}>
-          {place.tags.slice(0, 12).map((tag) => (
-            <View key={tag} style={styles.autoTag}>
-              <Text style={styles.autoTagText}>{tag}</Text>
-            </View>
+          {existingTags.map((tag) => (
+            <Pressable
+              key={tag}
+              style={styles.editableTag}
+              onPress={() => handleRemoveExistingTag(tag)}
+              disabled={isSaving}
+            >
+              <Text style={styles.editableTagText}>{tag}</Text>
+              <Ionicons name="close" size={12} color={colors.text.secondary} />
+            </Pressable>
           ))}
         </View>
 
@@ -684,5 +786,71 @@ const styles = StyleSheet.create({
     borderRadius: radius.sm,
     borderWidth: 1,
     borderColor: colors.ui.border,
+  },
+
+  // Photos
+  photoScroll: {
+    marginBottom: spacing.sm,
+  },
+  photoScrollContent: {
+    gap: spacing.sm,
+    paddingVertical: spacing.xs,
+  },
+  photoThumb: {
+    width: 90,
+    height: 90,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  photoImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: radius.sm,
+  },
+  photoRemoveBtn: {
+    position: 'absolute',
+    top: 4,
+    right: 4,
+    backgroundColor: colors.background.primary + 'CC',
+    borderRadius: 11,
+  },
+  photoAddBtn: {
+    width: 90,
+    height: 90,
+    borderRadius: radius.sm,
+    borderWidth: 1.5,
+    borderColor: colors.gold.primary + '40',
+    borderStyle: 'dashed',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.background.tertiary,
+  },
+  photoAddText: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 10,
+    color: colors.gold.primary,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
+  },
+
+  // Editable tags
+  editableTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.background.tertiary,
+    paddingHorizontal: spacing.sm + 2,
+    paddingVertical: 4,
+    borderRadius: radius.sm,
+    borderWidth: 0.5,
+    borderColor: colors.ui.border,
+  },
+  editableTagText: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 11,
+    color: colors.text.secondary,
+    letterSpacing: 0.3,
   },
 });
