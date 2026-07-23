@@ -1,53 +1,53 @@
 export const colors = {
   // ─── Foundation ─────────────────────────────────────────────────
-  // Deep, warm blacks with a green undertone — aged wood and leather
+  // Deep navy — midnight elegance
   background: {
-    primary: '#0B0F0E',      // Near-black with warm green cast
-    secondary: '#131A17',     // Dark forest floor
-    tertiary: '#1C2622',      // Mossy stone
-    overlay: 'rgba(11, 15, 14, 0.88)',
+    primary: '#010954',      // Deep navy
+    secondary: '#0A1264',     // Dark navy
+    tertiary: '#141C74',      // Slate navy
+    overlay: 'rgba(1, 9, 84, 0.88)',
   },
 
-  // ─── Accent — Warm Brass / Amber ───────────────────────────────
-  // Rich, antiqued brass — like old pharmacy hardware
+  // ─── Accent — Rich Gold ──────────────────────────────────────
+  // Warm, luxurious gold — polished and refined
   gold: {
-    primary: '#C4A265',       // Warm brass — main accent
-    light: '#DFC491',         // Pale amber highlight
-    metallic: '#B8935A',      // Deeper brass
-    muted: '#7D6A3E',         // Tarnished brass — subtle
+    primary: '#D4A843',       // Rich gold — main accent
+    light: '#E8C96E',         // Bright gold highlight
+    metallic: '#C49B38',      // Deep gold
+    muted: '#8B7A3E',         // Antiqued gold — subtle
   },
 
   // ─── Text ──────────────────────────────────────────────────────
   text: {
-    primary: '#F2EDE4',       // Warm parchment white
-    secondary: '#A8A196',     // Aged linen
-    tertiary: '#6B655C',      // Faded label
-    inverse: '#0B0F0E',
+    primary: '#F0EDE6',       // Warm ivory white
+    secondary: '#A0A4B0',     // Cool silver
+    tertiary: '#5C6178',      // Muted slate
+    inverse: '#010954',
   },
 
-  // ─── Category — Muted botanical / apothecary tones ─────────────
+  // ─── Category — Jewel tones on midnight ────────────────────────
   category: {
-    restaurant: '#7A9E7E',    // Sage
-    hotel: '#8B7355',         // Walnut
-    bar: '#9B6B6B',           // Dried rose
-    cafe: '#C4956A',          // Cinnamon
-    nature: '#6B8F71',        // Fern
-    culture: '#8B6F8B',       // Lavender
-    shopping: '#B8856C',      // Terracotta
-    nightlife: '#6B6F8B',     // Twilight
-    services: '#8B8B6B',      // Olive
+    restaurant: '#6B9E8A',    // Jade
+    lodging: '#8B7355',       // Amber walnut
+    bar: '#A06070',           // Garnet
+    cafe: '#C49060',          // Warm copper
+    nature: '#6B8F71',        // Emerald
+    culture: '#8B6F9B',       // Amethyst
+    shop: '#B8856C',           // Bronze
+    club: '#6B72A0',          // Sapphire
+    services: '#7E8B70',      // Sage
   },
 
   // ─── UI Chrome ─────────────────────────────────────────────────
   ui: {
-    border: '#262E2A',        // Subtle forest edge
-    divider: '#1A211E',       // Hairline
-    tabBarBg: '#0D1210',      // Slightly lighter than primary bg
-    cardBg: '#151C19',        // Card surface
-    searchBg: '#1A211E',      // Input fields
+    border: '#0E1570',        // Navy edge
+    divider: '#060D48',       // Deep navy hairline
+    tabBarBg: '#000842',      // Darker than primary
+    cardBg: '#0A1264',        // Navy card surface
+    searchBg: '#060D48',      // Input fields
     error: '#C75050',         // Muted red
-    success: '#6B8F71',       // Botanical green
-    warning: '#C4956A',       // Amber
+    success: '#5A9E6E',       // Emerald green
+    warning: '#D4A843',       // Gold
   },
 } as const;
 

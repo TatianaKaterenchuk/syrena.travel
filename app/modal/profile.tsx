@@ -1,9 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Image,
   Pressable,
   ScrollView,
   FlatList,
@@ -14,6 +13,7 @@ import {
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,6 +23,8 @@ import { colors, fonts, spacing, radius, shadows } from '../../src/theme';
 import { useAuthStore, usePlacesStore, useFriendsStore } from '../../src/stores';
 import { pickImage, takePhoto } from '../../src/utils/imagePicker';
 import { uploadImage } from '../../src/services/firebase/storage';
+import { avatarUrl, placeImageUri } from '../../src/utils/placeholderAvatar';
+import { confirmAndDeleteAccount } from '../../src/utils/accountDeletion';
 
 export default function ProfileModal() {
   const router = useRouter();
@@ -31,9 +33,12 @@ export default function ProfileModal() {
   const { userPlaces, fetchUserPlaces } = usePlacesStore();
   const { friends, fetchFriends } = useFriendsStore();
 
+  const dragStartY = useRef(0);
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [showPlaces, setShowPlaces] = useState(false);
+  const [showFriends, setShowFriends] = useState(false);
 
   // Editable fields
   const [editName, setEditName] = useState(profile?.displayName || '');
@@ -126,6 +131,20 @@ export default function ProfileModal() {
 
     setIsSaving(true);
     try {
+      // Enforce unique @handles when the username actually changes.
+      if (trimUsername !== (profile?.username || '')) {
+        const { getDocuments, where } = await import(
+          '../../src/services/firebase/firestore'
+        );
+        const taken = await getDocuments<any>('users', [
+          where('username', '==', trimUsername),
+        ]);
+        if (taken.some((u: any) => u.id !== user?.uid)) {
+          Alert.alert('Username Taken', `@${trimUsername} is already in use. Try another.`);
+          setIsSaving(false);
+          return;
+        }
+      }
       await updateProfile({
         displayName: trimName,
         username: trimUsername,
@@ -151,7 +170,11 @@ export default function ProfileModal() {
         onPress: async () => {
           try {
             await signOut();
-            router.replace('/(auth)/sign-in');
+            // Dismiss modal first, then navigate to sign-in
+            if (router.canGoBack()) router.back();
+            setTimeout(() => {
+              router.replace('/(auth)/sign-in');
+            }, 100);
           } catch (error) {
             Alert.alert('Error', 'Failed to sign out. Please try again.');
           }
@@ -161,49 +184,56 @@ export default function ProfileModal() {
   };
 
   const handleDeleteAccount = () => {
-    Alert.alert(
-      'Delete Account',
-      'This action cannot be undone. All your data will be permanently removed. Are you sure?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const auth = getAuth();
-              const currentUser = auth.currentUser;
-              if (currentUser) {
-                await deleteUser(currentUser);
-              }
-              router.replace('/(auth)/sign-in');
-            } catch (error: any) {
-              if (error?.code === 'auth/requires-recent-login') {
-                Alert.alert(
-                  'Re-authentication Required',
-                  'For security, please sign out, sign back in, and try again.',
-                );
-              } else {
-                Alert.alert('Error', 'Failed to delete account. Please try again.');
-              }
-            }
-          },
-        },
-      ],
-    );
+    confirmAndDeleteAccount(() => {
+      if (router.canGoBack()) router.back();
+      setTimeout(() => {
+        router.replace('/(auth)/sign-in');
+      }, 100);
+    });
+  };
+
+  // Close must ALWAYS work — the old `!isEditing &&` gate left the modal
+  // with no working exit once Edit Profile was tapped. In edit mode we
+  // discard the draft and close.
+  const handleClose = () => {
+    if (isEditing) handleCancelEdit();
+    Keyboard.dismiss();
+    router.back();
   };
 
   return (
     <View style={styles.overlay}>
-      <Pressable style={styles.backdrop} onPress={() => !isEditing && router.back()} />
+      <Pressable style={styles.backdrop} onPress={handleClose} />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
         <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.lg }]}>
-          {/* Brass Handle */}
-          <View style={styles.handleContainer}>
+          {/* Brass Handle + close (X) button. Dragging the handle down also
+              closes — people expect pull-to-dismiss on a bottom sheet. */}
+          <View
+            style={styles.handleContainer}
+            onStartShouldSetResponder={() => true}
+            onResponderGrant={(e) => {
+              dragStartY.current = e.nativeEvent.pageY;
+            }}
+            onResponderMove={(e) => {
+              if (e.nativeEvent.pageY - dragStartY.current > 40) {
+                dragStartY.current = Number.MAX_SAFE_INTEGER; // fire once
+                handleClose();
+              }
+            }}
+          >
             <View style={styles.handle} />
+            <Pressable
+              onPress={handleClose}
+              style={styles.profileCloseButton}
+              hitSlop={12}
+              accessibilityLabel="Close profile"
+              accessibilityRole="button"
+            >
+              <Ionicons name="close" size={22} color={colors.gold.primary} />
+            </Pressable>
           </View>
 
           <ScrollView
@@ -326,21 +356,63 @@ export default function ProfileModal() {
 
             {/* Stats */}
             <View style={styles.statsRow}>
-              <Pressable style={styles.statItem}>
+              <Pressable style={styles.statItem} onPress={() => { setShowPlaces(!showPlaces); setShowFriends(false); }}>
                 <Text style={styles.statNumber}>{userPlaces.length}</Text>
-                <Text style={styles.statLabel}>PLACES</Text>
+                <Text style={[styles.statLabel, showPlaces && { color: colors.gold.primary }]}>PLACES</Text>
               </Pressable>
               <View style={styles.statDivider} />
-              <Pressable style={styles.statItem}>
+              <Pressable style={styles.statItem} onPress={() => { setShowFriends(!showFriends); setShowPlaces(false); }}>
                 <Text style={styles.statNumber}>{friends.length}</Text>
-                <Text style={styles.statLabel}>FRIENDS</Text>
+                <Text style={[styles.statLabel, showFriends && { color: colors.gold.primary }]}>FRIENDS</Text>
               </Pressable>
             </View>
 
-            {/* Top Recommendations — only shown when the user has saved places */}
+            {/* Places List */}
+            {showPlaces && userPlaces.length > 0 && (
+              <View style={styles.expandedSection}>
+                {userPlaces.map((up) => (
+                  <Pressable
+                    key={up.id}
+                    style={styles.expandedRow}
+                    onPress={() => router.push({ pathname: '/modal/place-detail', params: { id: up.placeId } } as any)}
+                  >
+                    <Image source={{ uri: up.placeImageURL || placeImageUri(undefined, up.placeId) }} style={styles.expandedImage} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.expandedName} numberOfLines={1}>{up.placeName}</Text>
+                      <Text style={styles.expandedSub} numberOfLines={1}>
+                        {up.placeCity}{up.placeCountry ? `, ${up.placeCountry}` : ''}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={14} color={colors.text.tertiary} />
+                  </Pressable>
+                ))}
+              </View>
+            )}
+
+            {/* Friends List */}
+            {showFriends && friends.length > 0 && (
+              <View style={styles.expandedSection}>
+                {friends.map((f) => (
+                  <Pressable
+                    key={f.uid || (f as any).id}
+                    style={styles.expandedRow}
+                    onPress={() => router.push({ pathname: '/modal/user-profile', params: { id: f.uid } } as any)}
+                  >
+                    <Image
+                      source={{ uri: avatarUrl(f.photoURL, f.uid || (f as any).id) }}
+                      style={styles.expandedAvatar}
+                    />
+                    <Text style={styles.expandedName} numberOfLines={1}>{f.displayName}</Text>
+                    <Ionicons name="chevron-forward" size={14} color={colors.text.tertiary} />
+                  </Pressable>
+                ))}
+              </View>
+            )}
+
+            {/* My Picks — only shown when the user has saved places */}
             {topRecommendations.length > 0 && !isEditing && (
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Top Recommendations</Text>
+                <Text style={styles.sectionTitle}>My Picks</Text>
                 <FlatList
                   data={topRecommendations}
                   horizontal
@@ -348,7 +420,10 @@ export default function ProfileModal() {
                   contentContainerStyle={styles.recsList}
                   keyExtractor={(item) => item.id}
                   renderItem={({ item }) => (
-                    <Pressable style={styles.recCard}>
+                    <Pressable
+                      style={styles.recCard}
+                      onPress={() => router.push({ pathname: '/modal/place-detail', params: { id: item.placeId } })}
+                    >
                       {item.placeImageURL ? (
                         <Image
                           source={{ uri: item.placeImageURL }}
@@ -422,12 +497,22 @@ const styles = StyleSheet.create({
   handleContainer: {
     alignItems: 'center',
     paddingVertical: spacing.md,
+    position: 'relative',
   },
   handle: {
     width: 40,
     height: 2,
     borderRadius: 1,
     backgroundColor: colors.gold.muted,
+  },
+  profileCloseButton: {
+    position: 'absolute',
+    right: spacing.lg,
+    top: spacing.sm,
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 
   // Photo — double-ring effect
@@ -737,5 +822,49 @@ const styles = StyleSheet.create({
     color: colors.ui.error,
     opacity: 0.7,
     letterSpacing: 0.5,
+  },
+
+  // Expanded lists
+  expandedSection: {
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.lg,
+  },
+  expandedRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    paddingVertical: spacing.sm + 2,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.ui.divider,
+  },
+  expandedImage: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.sm,
+    backgroundColor: colors.background.tertiary,
+  },
+  expandedImageEmpty: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  expandedAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 0.5,
+    borderColor: colors.gold.muted,
+  },
+  expandedName: {
+    flex: 1,
+    fontFamily: fonts.sans.semiBold,
+    fontSize: 14,
+    color: colors.text.primary,
+  },
+  expandedSub: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 12,
+    color: colors.text.tertiary,
+    marginTop: 1,
   },
 });

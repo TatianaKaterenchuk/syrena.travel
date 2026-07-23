@@ -6,12 +6,12 @@ import {
   TextInput,
   Pressable,
   ScrollView,
-  Image,
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -19,8 +19,10 @@ import { colors, fonts, spacing, radius } from '../../src/theme';
 import {
   PlaceCategory,
   BudgetTier,
+  StarRating,
   BUDGET_LABELS,
   BUDGET_ICONS,
+  STAR_LABELS,
   PlaceEditableFields,
 } from '../../src/types';
 import { usePlacesStore } from '../../src/stores/usePlacesStore';
@@ -28,19 +30,22 @@ import { useAuthStore } from '../../src/stores/useAuthStore';
 import { generateTags } from '../../src/utils/generateTags';
 import { pickImage, takePhoto } from '../../src/utils/imagePicker';
 import { uploadImage } from '../../src/services/firebase/storage';
+import { searchPlacePhotos, PlacePhoto } from '../../src/services/googlePlaces';
 
 // ---------------------------------------------------------------------------
 // Constants (same as add-place.tsx)
 // ---------------------------------------------------------------------------
 
-const CATEGORIES: { key: PlaceCategory; label: string; emoji: string }[] = [
-  { key: 'restaurant', label: 'Eat', emoji: '🍽️' },
-  { key: 'hotel', label: 'Stay', emoji: '🏨' },
-  { key: 'bar', label: 'Bar', emoji: '🍸' },
-  { key: 'culture', label: 'Do', emoji: '🎯' },
-  { key: 'nature', label: 'Nature', emoji: '🌿' },
-  { key: 'shopping', label: 'Shopping', emoji: '🛍️' },
-  { key: 'services', label: 'Services', emoji: '🔧' },
+const CATEGORIES: { key: PlaceCategory; label: string; icon: string }[] = [
+  { key: 'restaurant', label: 'Eat', icon: 'restaurant-outline' },
+  { key: 'lodging', label: 'Stay', icon: 'bed-outline' },
+  { key: 'bar', label: 'Bar', icon: 'wine-outline' },
+  { key: 'cafe', label: 'Café', icon: 'cafe-outline' },
+  { key: 'club', label: 'Club', icon: 'musical-notes-outline' },
+  { key: 'culture', label: 'Culture', icon: 'color-palette-outline' },
+  { key: 'nature', label: 'Nature', icon: 'leaf-outline' },
+  { key: 'shop', label: 'Shop', icon: 'bag-outline' },
+  { key: 'services', label: 'Services', icon: 'construct-outline' },
 ];
 
 const BUDGET_TIERS: { key: BudgetTier; label: string; icon: string }[] = [
@@ -68,6 +73,7 @@ export default function EditPlaceModal() {
   // Form state — pre-filled from existing place
   const [name, setName] = useState(place?.name ?? '');
   const [description, setDescription] = useState(place?.description ?? '');
+  const [mustTry, setMustTry] = useState(place?.mustTry ?? '');
   const [selectedCategory, setSelectedCategory] = useState<PlaceCategory>(
     place?.category ?? 'restaurant',
   );
@@ -88,13 +94,18 @@ export default function EditPlaceModal() {
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
   const originalPhotoUrls = useMemo(() => new Set(place?.imageURLs ?? []), [place]);
 
-  const handlePickImage = async () => {
-    const uri = await pickImage();
+  // Web photo search state
+  const [webPhotos, setWebPhotos] = useState<PlacePhoto[]>([]);
+  const [isSearchingWeb, setIsSearchingWeb] = useState(false);
+  const [showWebSearch, setShowWebSearch] = useState(false);
+
+  const handlePickImage = async (aspect?: [number, number]) => {
+    const uri = await pickImage(aspect);
     if (uri) setPhotos((prev) => [...prev, uri]);
   };
 
-  const handleTakePhoto = async () => {
-    const uri = await takePhoto();
+  const handleTakePhoto = async (aspect?: [number, number]) => {
+    const uri = await takePhoto(aspect);
     if (uri) setPhotos((prev) => [...prev, uri]);
   };
 
@@ -102,10 +113,58 @@ export default function EditPlaceModal() {
     setPhotos((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleAddPhoto = () => {
+  const handleMovePhoto = (index: number, direction: 'left' | 'right') => {
+    setPhotos((prev) => {
+      const newPhotos = [...prev];
+      const swapIndex = direction === 'left' ? index - 1 : index + 1;
+      if (swapIndex < 0 || swapIndex >= newPhotos.length) return prev;
+      [newPhotos[index], newPhotos[swapIndex]] = [newPhotos[swapIndex], newPhotos[index]];
+      return newPhotos;
+    });
+  };
+
+  const handleSearchWeb = async () => {
+    const query = name || place?.name;
+    if (!query) {
+      Alert.alert('Enter a name first', 'A place name is needed to search for photos.');
+      return;
+    }
+    setShowWebSearch(true);
+    setIsSearchingWeb(true);
+    try {
+      const results = await searchPlacePhotos(query);
+      setWebPhotos(results);
+    } catch (error) {
+      console.error('Error searching web photos:', error);
+    } finally {
+      setIsSearchingWeb(false);
+    }
+  };
+
+  const handleSelectWebPhoto = (photo: PlacePhoto) => {
+    if (photos.includes(photo.url)) {
+      // Already added — remove it
+      setPhotos((prev) => prev.filter((p) => p !== photo.url));
+    } else {
+      setPhotos((prev) => [...prev, photo.url]);
+    }
+  };
+
+  const showSourcePicker = (aspect: [number, number] | undefined) => {
     Alert.alert('Add Photo', 'Choose a source', [
-      { text: 'Camera', onPress: handleTakePhoto },
-      { text: 'Photo Library', onPress: handlePickImage },
+      { text: 'Camera', onPress: () => handleTakePhoto(aspect) },
+      { text: 'Photo Library', onPress: () => handlePickImage(aspect) },
+      { text: 'Search Web', onPress: handleSearchWeb },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  };
+
+  const handleAddPhoto = () => {
+    Alert.alert('Photo Shape', 'Choose aspect ratio', [
+      { text: 'Square', onPress: () => showSourcePicker([1, 1]) },
+      { text: 'Portrait', onPress: () => showSourcePicker([3, 4]) },
+      { text: 'Landscape', onPress: () => showSourcePicker([4, 3]) },
+      { text: 'Free', onPress: () => showSourcePicker(undefined) },
       { text: 'Cancel', style: 'cancel' },
     ]);
   };
@@ -134,6 +193,10 @@ export default function EditPlaceModal() {
     if (description.trim() !== place.description) {
       changes.description = description.trim();
       original.description = place.description;
+    }
+    if (mustTry.trim() !== (place.mustTry ?? '')) {
+      changes.mustTry = mustTry.trim();
+      original.mustTry = place.mustTry ?? '';
     }
     if (selectedCategory !== place.category) {
       changes.category = selectedCategory;
@@ -228,13 +291,23 @@ export default function EditPlaceModal() {
         for (let i = 0; i < photos.length; i++) {
           const photo = photos[i];
           if (originalPhotoUrls.has(photo)) {
-            // Keep existing remote URL
+            // Keep existing Firebase Storage URL as-is
             uploadedURLs.push(photo);
-          } else {
-            // Upload new local file
+            continue;
+          }
+          if (/^https?:\/\//i.test(photo)) {
+            // New remote URL (Google Places CDN) — save directly. We used to
+            // re-upload these to Firebase Storage but the round-trip could
+            // silently fail, leaving the place with no images.
+            uploadedURLs.push(photo);
+            continue;
+          }
+          try {
             const path = `places/${user.uid}/${Date.now()}_${i}.jpg`;
             const url = await uploadImage(path, photo);
             uploadedURLs.push(url);
+          } catch (uploadErr) {
+            console.warn('[edit-place] failed to upload photo', i, uploadErr);
           }
         }
         finalImageURLs = uploadedURLs;
@@ -351,6 +424,29 @@ export default function EditPlaceModal() {
               >
                 <Ionicons name="close-circle" size={22} color={colors.ui.error} />
               </Pressable>
+              {photos.length > 1 && (
+                <View style={styles.reorderBar}>
+                  {index > 0 && (
+                    <Pressable
+                      style={styles.reorderArrow}
+                      onPress={() => handleMovePhoto(index, 'left')}
+                      hitSlop={6}
+                    >
+                      <Ionicons name="chevron-back" size={14} color={colors.text.primary} />
+                    </Pressable>
+                  )}
+                  <Text style={styles.photoIndex}>{index + 1}</Text>
+                  {index < photos.length - 1 && (
+                    <Pressable
+                      style={styles.reorderArrow}
+                      onPress={() => handleMovePhoto(index, 'right')}
+                      hitSlop={6}
+                    >
+                      <Ionicons name="chevron-forward" size={14} color={colors.text.primary} />
+                    </Pressable>
+                  )}
+                </View>
+              )}
             </View>
           ))}
           <Pressable style={styles.photoAddBtn} onPress={handleAddPhoto} disabled={isSaving}>
@@ -364,6 +460,39 @@ export default function EditPlaceModal() {
             )}
           </Pressable>
         </ScrollView>
+
+        {/* Web Photo Search Results */}
+        {showWebSearch && (
+          <View style={styles.webSearchSection}>
+            <View style={styles.webSearchHeader}>
+              <Text style={styles.webSearchTitle}>WEB PHOTOS</Text>
+              <Pressable onPress={() => setShowWebSearch(false)}>
+                <Ionicons name="close" size={18} color={colors.text.tertiary} />
+              </Pressable>
+            </View>
+            {isSearchingWeb ? (
+              <ActivityIndicator size="small" color={colors.gold.primary} style={{ paddingVertical: spacing.md }} />
+            ) : webPhotos.length === 0 ? (
+              <Text style={styles.webSearchEmpty}>No photos found</Text>
+            ) : (
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.webSearchScroll}>
+                {webPhotos.map((photo) => {
+                  const isSelected = photos.includes(photo.url);
+                  return (
+                    <Pressable key={photo.id} onPress={() => handleSelectWebPhoto(photo)} style={styles.webPhotoThumb}>
+                      <Image source={{ uri: photo.url }} style={[styles.webPhotoImage, isSelected && styles.webPhotoSelected]} />
+                      {isSelected && (
+                        <View style={styles.webPhotoCheck}>
+                          <Ionicons name="checkmark-circle" size={22} color={colors.gold.primary} />
+                        </View>
+                      )}
+                    </Pressable>
+                  );
+                })}
+              </ScrollView>
+            )}
+          </View>
+        )}
 
         {/* ---- Name ---- */}
         <Text style={styles.label}>NAME *</Text>
@@ -389,7 +518,7 @@ export default function EditPlaceModal() {
               onPress={() => setSelectedCategory(cat.key)}
               disabled={isSaving}
             >
-              <Text style={styles.categoryEmoji}>{cat.emoji}</Text>
+              <Ionicons name={cat.icon as any} size={14} color={selectedCategory === cat.key ? colors.gold.primary : colors.text.secondary} />
               <Text
                 style={[
                   styles.categoryLabel,
@@ -461,6 +590,31 @@ export default function EditPlaceModal() {
           textAlignVertical="top"
           editable={!isSaving}
         />
+
+        {/* ---- Must-try (food & drink places only) ---- */}
+        {(selectedCategory === 'restaurant' ||
+          selectedCategory === 'cafe' ||
+          selectedCategory === 'bar' ||
+          selectedCategory === 'club') && (
+          <>
+            <Text style={styles.label}>
+              {selectedCategory === 'bar' || selectedCategory === 'club'
+                ? 'MUST-TRY COCKTAILS / DRINKS'
+                : 'MUST-TRY DISHES'}
+            </Text>
+            <TextInput
+              style={[styles.input, styles.textArea, { minHeight: 70 }]}
+              value={mustTry}
+              onChangeText={setMustTry}
+              placeholder="What should people order?"
+              placeholderTextColor={colors.text.tertiary}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+              editable={!isSaving}
+            />
+          </>
+        )}
 
         {/* ---- Address ---- */}
         <Text style={styles.label}>ADDRESS</Text>
@@ -678,8 +832,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.gold.primary + '15',
     borderColor: colors.gold.primary,
   },
-  categoryEmoji: {
-    fontSize: 13,
+  categoryIcon: {
+    // icon size handled inline
   },
   categoryLabel: {
     fontFamily: fonts.sans.medium,
@@ -815,6 +969,31 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background.primary + 'CC',
     borderRadius: 11,
   },
+  reorderBar: {
+    position: 'absolute',
+    bottom: 4,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 2,
+  },
+  reorderArrow: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoIndex: {
+    fontFamily: fonts.sans.semiBold,
+    fontSize: 10,
+    color: colors.text.primary,
+    minWidth: 16,
+    textAlign: 'center',
+  },
   photoAddBtn: {
     width: 90,
     height: 90,
@@ -833,6 +1012,59 @@ const styles = StyleSheet.create({
     color: colors.gold.primary,
     letterSpacing: 1,
     textTransform: 'uppercase',
+  },
+
+  // Web photo search
+  webSearchSection: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.background.secondary,
+    borderRadius: radius.md,
+    borderWidth: 0.5,
+    borderColor: colors.ui.border,
+    padding: spacing.sm,
+  },
+  webSearchHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm,
+  },
+  webSearchTitle: {
+    fontFamily: fonts.sans.semiBold,
+    fontSize: 10,
+    color: colors.text.tertiary,
+    letterSpacing: 2,
+  },
+  webSearchEmpty: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 12,
+    color: colors.text.tertiary,
+    textAlign: 'center',
+    paddingVertical: spacing.md,
+  },
+  webSearchScroll: {
+    gap: spacing.sm,
+  },
+  webPhotoThumb: {
+    width: 80,
+    height: 80,
+    borderRadius: radius.sm,
+    overflow: 'hidden',
+  },
+  webPhotoImage: {
+    width: 80,
+    height: 80,
+    borderRadius: radius.sm,
+  },
+  webPhotoSelected: {
+    opacity: 0.6,
+  },
+  webPhotoCheck: {
+    position: 'absolute',
+    top: 2,
+    right: 2,
+    backgroundColor: colors.background.primary,
+    borderRadius: 11,
   },
 
   // Editable tags

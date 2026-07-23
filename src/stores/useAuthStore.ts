@@ -7,7 +7,56 @@ import {
   signOut as firebaseSignOut,
   subscribeToAuthState,
 } from '../services/firebase/auth';
-import { getDocument, updateDocument } from '../services/firebase/firestore';
+import { getDocument, getDocuments, updateDocument, deleteDocument, where } from '../services/firebase/firestore';
+
+/**
+ * Propagate identity changes (name/photo/username) to every denormalized
+ * copy: friend docs on OTHER users' lists, pending requests we sent,
+ * conversation participant maps, and places we created. Without this,
+ * renames froze at creation time everywhere outside the profile.
+ */
+async function syncIdentityFanOut(uid: string, profile: UserProfile): Promise<void> {
+  const name = profile.displayName || '';
+  const username = profile.username || '';
+  const photo = profile.photoURL || '';
+
+  const [friendDocs, requestDocs, convoDocs, placeDocs] = await Promise.all([
+    getDocuments<any>('friends', [where('uid', '==', uid)]),
+    getDocuments<any>('friendRequests', [
+      where('fromUid', '==', uid),
+      where('status', '==', 'pending'),
+    ]),
+    getDocuments<any>('conversations', [
+      where('participants', 'array-contains', uid),
+    ]),
+    getDocuments<any>('places', [where('createdBy', '==', uid)]),
+  ]);
+
+  await Promise.all([
+    ...friendDocs.map((f: any) =>
+      updateDocument('friends', f.id, {
+        displayName: name,
+        photoURL: photo,
+        ...(username ? { username } : {}),
+      }),
+    ),
+    ...requestDocs.map((r: any) =>
+      updateDocument('friendRequests', r.id, { fromName: name, fromPhoto: photo }),
+    ),
+    ...convoDocs.map((c: any) =>
+      updateDocument('conversations', c.id, {
+        [`participantNames.${uid}`]: name,
+        [`participantPhotos.${uid}`]: photo,
+      }),
+    ),
+    ...placeDocs.map((p: any) =>
+      updateDocument('places', p.id, {
+        createdByName: name,
+        createdByPhoto: photo,
+      }),
+    ),
+  ]);
+}
 
 /** Compute whether a profile counts as "approved". */
 function computeApproved(profile: UserProfile | null): boolean {
@@ -36,6 +85,8 @@ interface AuthActions {
   updateProfile: (data: Partial<UserProfile>) => Promise<void>;
   approveUser: (uid: string) => Promise<void>;
   rejectUser: (uid: string) => Promise<void>;
+  banUser: (uid: string) => Promise<void>;
+  unbanUser: (uid: string) => Promise<void>;
   refreshProfile: () => Promise<void>;
   initialize: () => () => void;
 }
@@ -50,10 +101,12 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
 
   // Actions
   setUser: (user) => {
-    set({
-      user,
-      isAuthenticated: !!user,
-    });
+    if (!user) {
+      // Clearing user must also clear derived auth-state to keep everything consistent
+      set({ user: null, isAuthenticated: false, profile: null, isApproved: false });
+    } else {
+      set({ user, isAuthenticated: true });
+    }
   },
 
   setProfile: (profile) => {
@@ -107,6 +160,38 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
         isApproved: false,
         isLoading: false,
       });
+      // Reset all per-user store data so the next user signing in on the same
+      // device doesn't briefly see the previous user's friends, messages, lists, etc.
+      // Use lazy require to avoid circular imports.
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { useFriendsStore } = require('./useFriendsStore');
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { useMessagingStore } = require('./useMessagingStore');
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { usePlacesStore } = require('./usePlacesStore');
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { useListsStore } = require('./useListsStore');
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { useGuidesStore } = require('./useGuidesStore');
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const { useAdminNotificationStore } = require('./useAdminNotificationStore');
+
+        useFriendsStore.setState({ friends: [], requests: [], sentRequests: [] });
+        useMessagingStore.setState({ conversations: [], messages: {}, unreadCount: 0 });
+        usePlacesStore.setState({
+          userPlaces: [],
+          beenPlaceIds: [],
+          pickedUsers: [],
+          featuredPicks: [],
+        });
+        useListsStore.setState({ lists: [] });
+        useGuidesStore.setState({ guides: [] });
+        useAdminNotificationStore.setState?.({});
+      } catch (resetError) {
+        // Don't fail the sign-out if a reset fails; just log it
+        console.warn('[signOut] failed to reset stores:', resetError);
+      }
     } catch (error) {
       set({ isLoading: false });
       throw error;
@@ -124,6 +209,19 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
         profile: updated,
         isApproved: computeApproved(updated),
       });
+
+      // Fan out identity changes to the denormalized copies (friends lists,
+      // pending requests, conversations, places). Fire-and-forget — the
+      // profile save shouldn't block on this.
+      if (
+        data.displayName !== undefined ||
+        data.photoURL !== undefined ||
+        data.username !== undefined
+      ) {
+        syncIdentityFanOut(user.uid, updated).catch((e) =>
+          console.warn('[updateProfile] identity fan-out failed', e),
+        );
+      }
     } catch (error) {
       throw error;
     }
@@ -135,6 +233,59 @@ export const useAuthStore = create<AuthState & AuthActions>((set, get) => ({
 
   rejectUser: async (uid) => {
     await updateDocument('users', uid, { status: 'rejected' });
+  },
+
+  banUser: async (uid) => {
+    // 1. Set status to banned
+    await updateDocument('users', uid, { status: 'banned' });
+
+    // 2. Clean up user data from related collections
+    const collectionsToClean = [
+      { collection: 'userPlaces', field: 'userId' },
+      { collection: 'placeVisits', field: 'userId' },
+      { collection: 'userLists', field: 'userId' },
+    ];
+
+    for (const { collection, field } of collectionsToClean) {
+      try {
+        const docs = await getDocuments(collection, [where(field, '==', uid)]);
+        for (const doc of docs) {
+          await deleteDocument(collection, (doc as any).id);
+        }
+      } catch (e) {
+        console.warn(`Error cleaning ${collection}:`, e);
+      }
+    }
+
+    // 3. Clean friends (both directions)
+    try {
+      const [myFriendDocs, theirFriendDocs] = await Promise.all([
+        getDocuments('friends', [where('userId', '==', uid)]),
+        getDocuments('friends', [where('uid', '==', uid)]),
+      ]);
+      for (const doc of [...myFriendDocs, ...theirFriendDocs]) {
+        await deleteDocument('friends', (doc as any).id);
+      }
+    } catch (e) {
+      console.warn('Error cleaning friends:', e);
+    }
+
+    // 4. Clean friend requests (both directions)
+    try {
+      const [sentReqs, recvReqs] = await Promise.all([
+        getDocuments('friendRequests', [where('fromUid', '==', uid)]),
+        getDocuments('friendRequests', [where('toUid', '==', uid)]),
+      ]);
+      for (const doc of [...sentReqs, ...recvReqs]) {
+        await deleteDocument('friendRequests', (doc as any).id);
+      }
+    } catch (e) {
+      console.warn('Error cleaning friendRequests:', e);
+    }
+  },
+
+  unbanUser: async (uid) => {
+    await updateDocument('users', uid, { status: 'approved' });
   },
 
   refreshProfile: async () => {

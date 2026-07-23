@@ -1,200 +1,229 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   Pressable,
-  Image,
+  Dimensions,
   ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors, fonts, spacing, radius, shadows } from '../../src/theme';
-import { usePlacesStore } from '../../src/stores';
-import { Place, PlaceCategory } from '../../src/types';
+import { usePlacesStore, useListsStore, useAuthStore } from '../../src/stores';
 
-// ---------------------------------------------------------------------------
-// Category display-name mapping
-// ---------------------------------------------------------------------------
-
-const categoryLabels: Record<PlaceCategory, { title: string; subtitle: string }> = {
-  restaurant: { title: 'Fine Dining', subtitle: 'Unforgettable culinary experiences' },
-  hotel: { title: 'Luxury Hotels', subtitle: 'Where to stay in style' },
-  bar: { title: 'Cocktail Bars', subtitle: 'Best spots for drinks' },
-  cafe: { title: 'Charming Cafes', subtitle: 'Perfect coffee & pastries' },
-  nature: { title: 'Nature Escapes', subtitle: 'Reconnect with the outdoors' },
-  culture: { title: 'Culture & Arts', subtitle: 'Museums, galleries & landmarks' },
-  shopping: { title: 'Shopping', subtitle: 'Retail therapy destinations' },
-  nightlife: { title: 'Nightlife', subtitle: 'After dark adventures' },
-  services: { title: 'Services', subtitle: 'Essential local services & more' },
-};
-
-// ---------------------------------------------------------------------------
-// Guide collection type derived from store data
-// ---------------------------------------------------------------------------
-
-interface GuideCollection {
-  category: PlaceCategory;
-  title: string;
-  subtitle: string;
-  placesCount: number;
-  imageURL: string;
-}
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const GRID_GAP = spacing.md;
+const CARD_SIZE = (SCREEN_WIDTH - spacing.xl * 2 - GRID_GAP) / 2;
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export default function GuideScreen() {
+export default function ListsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const { places, isLoading, fetchPlaces } = usePlacesStore();
+  const user = useAuthStore((s) => s.user);
+  const { userPlaces, places, fetchUserPlaces } = usePlacesStore();
+  const { lists, isLoading, fetchLists } = useListsStore();
 
-  // Fetch places on mount
-  useEffect(() => {
-    fetchPlaces();
-  }, []);
+  // Fetch data on focus
+  useFocusEffect(
+    useCallback(() => {
+      if (user?.uid) {
+        fetchLists();
+        fetchUserPlaces();
+      }
+    }, [user?.uid]),
+  );
 
-  // Derive guide collections by grouping places by category
-  const { featured, otherGuides } = useMemo(() => {
-    if (places.length === 0) {
-      return { featured: null, otherGuides: [] };
-    }
+  // Derive favorites from existing userPlaces
+  const favorites = useMemo(
+    () => userPlaces.filter((up) => up.isFavorite),
+    [userPlaces],
+  );
 
-    // Group places by category
-    const grouped = new Map<PlaceCategory, typeof places>();
-    for (const place of places) {
-      const existing = grouped.get(place.category);
-      if (existing) {
-        existing.push(place);
-      } else {
-        grouped.set(place.category, [place]);
+  const favoriteCoverImage = favorites[0]?.placeImageURL || '';
+
+  // ------ Handlers ------
+  const handleFavoritesTap = useCallback(() => {
+    router.push({
+      pathname: '/modal/list-detail',
+      params: { type: 'favorites' },
+    } as any);
+  }, [router]);
+
+  const handleListTap = useCallback(
+    (listId: string) => {
+      router.push({
+        pathname: '/modal/list-detail',
+        params: { id: listId },
+      } as any);
+    },
+    [router],
+  );
+
+  const handleNewList = useCallback(() => {
+    router.push('/modal/create-list' as any);
+  }, [router]);
+
+  // ------ Build grid items ------
+  // Items: [My Favorites, ...user lists, + New List]
+  type GridItem =
+    | { kind: 'favorites' }
+    | { kind: 'list'; id: string; name: string; coverImageURL: string; placeCount: number }
+    | { kind: 'new' };
+
+  // Build a quick lookup: placeId → first image URL
+  const placeImageMap = useMemo(() => {
+    const map = new Map<string, string>();
+    // From userPlaces (saved places)
+    for (const up of userPlaces) {
+      if (up.placeImageURL && !map.has(up.placeId)) {
+        map.set(up.placeId, up.placeImageURL);
       }
     }
-
-    // Build guide collections
-    const collections: GuideCollection[] = [];
-    for (const [category, categoryPlaces] of grouped) {
-      const labels = categoryLabels[category];
-      if (!labels) continue;
-
-      const firstImage =
-        categoryPlaces[0]?.imageURLs?.[0] ||
-        'https://picsum.photos/600/400?random=1';
-
-      collections.push({
-        category,
-        title: labels.title,
-        subtitle: labels.subtitle,
-        placesCount: categoryPlaces.length,
-        imageURL: firstImage,
-      });
-    }
-
-    // Sort by placesCount descending so the featured guide is the biggest category
-    collections.sort((a, b) => b.placesCount - a.placesCount);
-
-    const featuredGuide = collections[0] ?? null;
-    const rest = collections.slice(1);
-
-    return { featured: featuredGuide, otherGuides: rest };
-  }, [places]);
-
-  // Selected category for inline expansion
-  const [selectedCategory, setSelectedCategory] = useState<PlaceCategory | null>(null);
-
-  // Build a lookup of places grouped by category
-  const placesByCategory = useMemo(() => {
-    const map = new Map<PlaceCategory, Place[]>();
-    for (const place of places) {
-      const existing = map.get(place.category);
-      if (existing) {
-        existing.push(place);
-      } else {
-        map.set(place.category, [place]);
+    // From all places (covers places the user hasn't saved but added to a list)
+    for (const p of places) {
+      if (p.imageURLs?.[0] && !map.has(p.id)) {
+        map.set(p.id, p.imageURLs[0]);
       }
     }
     return map;
-  }, [places]);
+  }, [userPlaces, places]);
+
+  const gridItems: GridItem[] = useMemo(() => {
+    const items: GridItem[] = [{ kind: 'favorites' }];
+    for (const list of lists) {
+      // Use explicit cover if set; otherwise fall back to the first place's image
+      let cover = list.coverImageURL || '';
+      if (!cover && list.placeIds.length > 0) {
+        for (const pid of list.placeIds) {
+          const img = placeImageMap.get(pid);
+          if (img) { cover = img; break; }
+        }
+      }
+      items.push({
+        kind: 'list',
+        id: list.id,
+        name: list.name,
+        coverImageURL: cover,
+        placeCount: list.placeIds.length,
+      });
+    }
+    items.push({ kind: 'new' });
+    return items;
+  }, [lists, placeImageMap]);
 
   // ------ Loading state ------
-  if (isLoading && places.length === 0) {
+  if (isLoading && lists.length === 0 && !user) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Guide</Text>
+          <Text style={styles.headerTitle}>My Lists</Text>
           <View style={styles.headerRule} />
-          <Text style={styles.headerSubtitle}>CURATED COLLECTIONS</Text>
+          <Text style={styles.headerSubtitle}>YOUR COLLECTIONS</Text>
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.gold.muted} />
-          <Text style={styles.loadingText}>Preparing your guide...</Text>
+          <Text style={styles.loadingText}>Loading your lists...</Text>
         </View>
       </View>
     );
   }
 
-  // ------ Handlers ------
-  const handleGuidePress = useCallback((guide: GuideCollection) => {
-    setSelectedCategory((prev) => (prev === guide.category ? null : guide.category));
-  }, []);
+  // ------ Render a single grid card ------
+  const renderCard = (item: GridItem, index: number) => {
+    const isLeft = index % 2 === 0;
 
-  const handlePlacePress = useCallback((place: Place) => {
-    router.push({
-      pathname: '/modal/place-detail',
-      params: { id: place.id },
-    } as any);
-  }, [router]);
-
-  // Helper to render the expanded place list for a given category
-  const renderExpandedPlaces = (category: PlaceCategory) => {
-    if (selectedCategory !== category) return null;
-    const categoryPlaces = placesByCategory.get(category) || [];
-    if (categoryPlaces.length === 0) return null;
-
-    return (
-      <View style={styles.expandedContainer}>
-        <View style={styles.expandedHeaderRule} />
-        {categoryPlaces.map((place, index) => (
-          <Pressable
-            key={place.id}
-            style={[
-              styles.expandedPlaceCard,
-              index === categoryPlaces.length - 1 && styles.expandedPlaceCardLast,
-            ]}
-            onPress={() => handlePlacePress(place)}
-          >
-            <View style={styles.expandedPlaceIndex}>
-              <Text style={styles.expandedPlaceIndexText}>
-                {String(index + 1).padStart(2, '0')}
-              </Text>
-            </View>
+    if (item.kind === 'favorites') {
+      return (
+        <Pressable
+          key="favorites"
+          style={[
+            styles.card,
+            isLeft ? styles.cardLeft : styles.cardRight,
+          ]}
+          onPress={handleFavoritesTap}
+        >
+          {favoriteCoverImage ? (
             <Image
-              source={{ uri: place.imageURLs?.[0] || 'https://picsum.photos/200/200?random=1' }}
-              style={styles.expandedPlaceImage}
+              source={{ uri: favoriteCoverImage }}
+              style={styles.cardImage}
             />
-            <View style={styles.expandedPlaceContent}>
-              <Text style={styles.expandedPlaceName} numberOfLines={1}>
-                {place.name}
-              </Text>
-              <Text style={styles.expandedPlaceCity} numberOfLines={1}>
-                {place.city}
-              </Text>
-              {place.rating > 0 && (
-                <View style={styles.expandedPlaceRating}>
-                  <Ionicons name="star" size={11} color={colors.gold.primary} />
-                  <Text style={styles.expandedPlaceRatingText}>
-                    {place.rating.toFixed(1)}
-                  </Text>
-                </View>
-              )}
+          ) : (
+            <View style={[styles.cardImage, styles.cardPlaceholder]}>
+              <Ionicons name="star" size={32} color={colors.gold.muted} />
             </View>
-            <Ionicons name="chevron-forward" size={14} color={colors.gold.muted} />
-          </Pressable>
-        ))}
-      </View>
+          )}
+          <View style={styles.cardGradient} />
+          <View style={styles.cardContent}>
+            <Text style={styles.cardName} numberOfLines={1}>
+              My Favorites
+            </Text>
+            <Text style={styles.cardCount}>
+              {favorites.length} {favorites.length === 1 ? 'place' : 'places'}
+            </Text>
+          </View>
+        </Pressable>
+      );
+    }
+
+    if (item.kind === 'list') {
+      return (
+        <Pressable
+          key={item.id}
+          style={[
+            styles.card,
+            isLeft ? styles.cardLeft : styles.cardRight,
+          ]}
+          onPress={() => handleListTap(item.id)}
+        >
+          {item.coverImageURL ? (
+            <Image
+              source={{ uri: item.coverImageURL }}
+              style={styles.cardImage}
+            />
+          ) : (
+            <View style={[styles.cardImage, styles.cardPlaceholder]}>
+              <Ionicons name="list" size={28} color={colors.gold.muted} />
+            </View>
+          )}
+          <View style={styles.cardGradient} />
+          <View style={styles.cardContent}>
+            <Text style={styles.cardName} numberOfLines={1}>
+              {item.name}
+            </Text>
+            <Text style={styles.cardCount}>
+              {item.placeCount} {item.placeCount === 1 ? 'place' : 'places'}
+            </Text>
+          </View>
+        </Pressable>
+      );
+    }
+
+    // kind === 'new'
+    return (
+      <Pressable
+        key="new-list"
+        style={[
+          styles.card,
+          styles.cardNew,
+          isLeft ? styles.cardLeft : styles.cardRight,
+        ]}
+        onPress={handleNewList}
+      >
+        <View style={styles.newListContent}>
+          <View style={styles.newListIconCircle}>
+            <Ionicons name="add" size={28} color={colors.gold.primary} />
+          </View>
+          <Text style={styles.newListText}>New List</Text>
+        </View>
+      </Pressable>
     );
   };
 
@@ -203,108 +232,29 @@ export default function GuideScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Guide</Text>
+        <Text style={styles.headerTitle}>My Lists</Text>
         <View style={styles.headerRule} />
-        <Text style={styles.headerSubtitle}>CURATED COLLECTIONS</Text>
+        <Text style={styles.headerSubtitle}>YOUR COLLECTIONS</Text>
       </View>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
       >
-        {/* Featured Guide */}
-        {featured && (
-          <>
-            <Pressable
-              style={styles.featuredCard}
-              onPress={() => handleGuidePress(featured)}
-            >
-              <Image
-                source={{ uri: featured.imageURL }}
-                style={styles.featuredImage}
-              />
-              {/* Decorative brass line at top */}
-              <View style={styles.featuredBrassLine} />
-              <View style={styles.featuredOverlay}>
-                <View style={styles.featuredBadge}>
-                  <Ionicons name="star" size={10} color={colors.gold.primary} />
-                  <Text style={styles.featuredBadgeText}>FEATURED</Text>
-                </View>
-                <View style={styles.featuredContent}>
-                  <Text style={styles.featuredTitle}>{featured.title}</Text>
-                  <Text style={styles.featuredSubtitle}>
-                    {featured.subtitle}
-                  </Text>
-                  <View style={styles.featuredDivider} />
-                  <View style={styles.featuredMeta}>
-                    <Ionicons
-                      name="location"
-                      size={13}
-                      color={colors.gold.light}
-                    />
-                    <Text style={styles.featuredMetaText}>
-                      {featured.placesCount} places
-                    </Text>
-                  </View>
-                </View>
-              </View>
-            </Pressable>
-            {renderExpandedPlaces(featured.category)}
-          </>
-        )}
-
-        {/* Guide List */}
-        {otherGuides.length > 0 && (
-          <>
-            <View style={styles.sectionHeader}>
-              <View style={styles.sectionRuleLeft} />
-              <Text style={styles.sectionTitle}>All Collections</Text>
-              <View style={styles.sectionRuleRight} />
-            </View>
-
-            {otherGuides.map((guide) => (
-              <React.Fragment key={guide.category}>
-                <Pressable
-                  style={styles.guideCard}
-                  onPress={() => handleGuidePress(guide)}
-                >
-                  {/* Brass accent line on left edge */}
-                  <View style={styles.guideAccentLine} />
-                  <Image
-                    source={{ uri: guide.imageURL }}
-                    style={styles.guideImage}
-                  />
-                  <View style={styles.guideContent}>
-                    <Text style={styles.guideTitle}>{guide.title}</Text>
-                    <Text style={styles.guideSubtitle}>{guide.subtitle}</Text>
-                    <View style={styles.guideMeta}>
-                      <Ionicons
-                        name="location-outline"
-                        size={11}
-                        color={colors.gold.muted}
-                      />
-                      <Text style={styles.guideMetaText}>
-                        {guide.placesCount} places
-                      </Text>
-                    </View>
-                  </View>
-                  <Ionicons
-                    name={selectedCategory === guide.category ? 'chevron-down' : 'chevron-forward'}
-                    size={16}
-                    color={selectedCategory === guide.category ? colors.gold.primary : colors.gold.muted}
-                  />
-                </Pressable>
-                {renderExpandedPlaces(guide.category)}
-              </React.Fragment>
-            ))}
-          </>
-        )}
+        {/* Grid */}
+        <View style={styles.grid}>
+          {gridItems.map((item, index) => renderCard(item, index))}
+        </View>
 
         <View style={{ height: spacing.xxxl }} />
       </ScrollView>
     </View>
   );
 }
+
+// ---------------------------------------------------------------------------
+// Styles
+// ---------------------------------------------------------------------------
 
 const styles = StyleSheet.create({
   // ─── Layout ───────────────────────────────────────────────────────
@@ -355,240 +305,107 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
 
-  // ─── Featured Card ────────────────────────────────────────────────
-  featuredCard: {
-    marginHorizontal: spacing.xl,
-    marginBottom: spacing.xl,
-    borderRadius: radius.lg,
-    overflow: 'hidden',
-    height: 240,
-    ...shadows.lg,
+  // ─── Grid ─────────────────────────────────────────────────────────
+  grid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingHorizontal: spacing.xl,
   },
-  featuredImage: {
+  card: {
+    width: CARD_SIZE,
+    height: CARD_SIZE,
+    borderRadius: radius.md,
+    overflow: 'hidden',
+    marginBottom: GRID_GAP,
+    ...shadows.md,
+  },
+  cardLeft: {
+    marginRight: GRID_GAP / 2,
+  },
+  cardRight: {
+    marginLeft: GRID_GAP / 2,
+  },
+  cardImage: {
     width: '100%',
     height: '100%',
     backgroundColor: colors.background.tertiary,
   },
-  featuredBrassLine: {
+  cardPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: colors.ui.cardBg,
+  },
+  cardGradient: {
     position: 'absolute',
-    top: 0,
+    bottom: 0,
     left: 0,
     right: 0,
-    height: 2.5,
-    backgroundColor: colors.gold.primary,
-    zIndex: 2,
-  },
-  featuredOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(11, 15, 14, 0.52)',
-    justifyContent: 'space-between',
-    padding: spacing.xl,
-  },
-  featuredBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-start',
-    backgroundColor: 'rgba(11, 15, 14, 0.75)',
-    borderWidth: 1,
-    borderColor: colors.gold.muted,
-    paddingHorizontal: spacing.md,
-    paddingVertical: 5,
-    borderRadius: 3,
-    gap: 6,
-  },
-  featuredBadgeText: {
-    fontFamily: fonts.sans.medium,
-    fontSize: 9,
-    color: colors.gold.primary,
-    letterSpacing: 2.5,
-  },
-  featuredContent: {
-    gap: 6,
-  },
-  featuredTitle: {
-    fontFamily: fonts.serif.bold,
-    fontSize: 26,
-    color: colors.text.primary,
-    letterSpacing: 0.5,
-  },
-  featuredSubtitle: {
-    fontFamily: fonts.sans.regular,
-    fontSize: 13,
-    color: colors.gold.light,
-    letterSpacing: 0.3,
-  },
-  featuredDivider: {
-    width: 28,
-    height: 1,
-    backgroundColor: colors.gold.muted,
-    marginVertical: 2,
-  },
-  featuredMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  featuredMetaText: {
-    fontFamily: fonts.sans.medium,
-    fontSize: 12,
-    color: colors.gold.light,
-    letterSpacing: 0.5,
-  },
-
-  // ─── Section Header ───────────────────────────────────────────────
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.xl,
-    marginTop: spacing.sm,
-    marginBottom: spacing.xl,
-    gap: spacing.md,
-  },
-  sectionRuleLeft: {
-    width: 20,
-    height: 1,
-    backgroundColor: colors.gold.muted,
-  },
-  sectionTitle: {
-    fontFamily: fonts.serif.regular,
-    fontSize: 16,
-    color: colors.text.secondary,
-    letterSpacing: 2,
-  },
-  sectionRuleRight: {
-    flex: 1,
-    height: 1,
-    backgroundColor: colors.ui.divider,
-  },
-
-  // ─── Guide Cards ──────────────────────────────────────────────────
-  guideCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginHorizontal: spacing.xl,
-    marginBottom: spacing.md,
-    backgroundColor: colors.ui.cardBg,
-    borderRadius: radius.md,
-    overflow: 'hidden',
-    paddingVertical: spacing.md,
-    paddingRight: spacing.lg,
-    paddingLeft: 0,
-    gap: spacing.md,
-    ...shadows.sm,
-  },
-  guideAccentLine: {
-    width: 3,
-    alignSelf: 'stretch',
-    backgroundColor: colors.gold.muted,
-    borderTopLeftRadius: radius.md,
+    height: '55%',
+    backgroundColor: 'transparent',
+    // Simulated gradient with overlapping layers
     borderBottomLeftRadius: radius.md,
+    borderBottomRightRadius: radius.md,
+    // Dark overlay at the bottom
+    ...(
+      {
+        background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
+      } as any
+    ),
+    // Fallback for RN — we use a semi-transparent overlay
+    // The real gradient is handled by the cardContent background
   },
-  guideImage: {
-    width: 68,
-    height: 68,
-    borderRadius: radius.sm,
-    backgroundColor: colors.background.tertiary,
-    marginLeft: spacing.sm,
+  cardContent: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: spacing.md,
+    backgroundColor: 'rgba(10, 14, 12, 0.75)',
   },
-  guideContent: {
-    flex: 1,
-    gap: 3,
-  },
-  guideTitle: {
+  cardName: {
     fontFamily: fonts.serif.bold,
-    fontSize: 16,
-    color: colors.text.primary,
-    letterSpacing: 0.3,
-  },
-  guideSubtitle: {
-    fontFamily: fonts.sans.regular,
-    fontSize: 12,
-    color: colors.text.secondary,
-    letterSpacing: 0.2,
-  },
-  guideMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 3,
-  },
-  guideMetaText: {
-    fontFamily: fonts.sans.regular,
-    fontSize: 11,
-    color: colors.gold.muted,
-    letterSpacing: 0.5,
-  },
-
-  // ─── Expanded Place List ──────────────────────────────────────────
-  expandedContainer: {
-    marginHorizontal: spacing.xl,
-    marginBottom: spacing.lg,
-    backgroundColor: colors.ui.cardBg,
-    borderRadius: radius.md,
-    overflow: 'hidden',
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: colors.ui.border,
-  },
-  expandedHeaderRule: {
-    height: 1,
-    backgroundColor: colors.gold.muted,
-    marginHorizontal: spacing.lg,
-    opacity: 0.4,
-  },
-  expandedPlaceCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: spacing.md,
-    paddingHorizontal: spacing.lg,
-    gap: spacing.md,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.ui.divider,
-  },
-  expandedPlaceCardLast: {
-    borderBottomWidth: 0,
-  },
-  expandedPlaceIndex: {
-    width: 22,
-    alignItems: 'center',
-  },
-  expandedPlaceIndexText: {
-    fontFamily: fonts.sans.regular,
-    fontSize: 10,
-    color: colors.gold.muted,
-    letterSpacing: 1,
-  },
-  expandedPlaceImage: {
-    width: 48,
-    height: 48,
-    borderRadius: radius.sm,
-    backgroundColor: colors.background.tertiary,
-  },
-  expandedPlaceContent: {
-    flex: 1,
-    gap: 2,
-  },
-  expandedPlaceName: {
-    fontFamily: fonts.serif.regular,
     fontSize: 14,
     color: colors.text.primary,
-    letterSpacing: 0.2,
+    letterSpacing: 0.3,
   },
-  expandedPlaceCity: {
+  cardCount: {
     fontFamily: fonts.sans.regular,
     fontSize: 11,
-    color: colors.text.tertiary,
-    letterSpacing: 0.3,
-  },
-  expandedPlaceRating: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
+    color: colors.gold.muted,
+    letterSpacing: 0.5,
     marginTop: 2,
   },
-  expandedPlaceRatingText: {
+
+  // ─── New List Card ────────────────────────────────────────────────
+  cardNew: {
+    backgroundColor: 'transparent',
+    borderWidth: 1.5,
+    borderColor: colors.ui.border,
+    borderStyle: 'dashed',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  newListContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  newListIconCircle: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(201, 168, 76, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.gold.muted,
+  },
+  newListText: {
     fontFamily: fonts.sans.medium,
-    fontSize: 11,
-    color: colors.gold.primary,
-    letterSpacing: 0.3,
+    fontSize: 12,
+    color: colors.gold.muted,
+    letterSpacing: 1,
+    textTransform: 'uppercase',
   },
 });

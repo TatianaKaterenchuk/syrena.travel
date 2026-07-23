@@ -3,7 +3,7 @@ import * as Device from 'expo-device';
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { updateDocument, getDocuments, where } from './firebase/firestore';
-import { UserProfile } from '../types';
+import { UserProfile, Friend } from '../types';
 
 // Configure notification behavior when app is in foreground
 Notifications.setNotificationHandler({
@@ -52,11 +52,23 @@ export async function registerForPushNotifications(): Promise<string | null> {
     const tokenData = await Notifications.getExpoPushTokenAsync({ projectId });
     const token = tokenData.data;
 
-    // Android-specific channel
+    // Android-specific channels
     if (Platform.OS === 'android') {
       await Notifications.setNotificationChannelAsync('admin-approvals', {
         name: 'Admin Approvals',
         importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#C4A265',
+      });
+      await Notifications.setNotificationChannelAsync('messages', {
+        name: 'Messages',
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#C4A265',
+      });
+      await Notifications.setNotificationChannelAsync('new-places', {
+        name: 'New Places',
+        importance: Notifications.AndroidImportance.DEFAULT,
         vibrationPattern: [0, 250, 250, 250],
         lightColor: '#C4A265',
       });
@@ -77,6 +89,52 @@ export async function savePushToken(userId: string, token: string): Promise<void
     await updateDocument('users', userId, { expoPushToken: token });
   } catch (error) {
     console.error('Error saving push token:', error);
+  }
+}
+
+/**
+ * Send a push notification to a specific user by UID.
+ */
+export async function sendPushToUser(
+  recipientUid: string,
+  title: string,
+  body: string,
+  data?: Record<string, unknown>,
+): Promise<void> {
+  try {
+    const users = await getDocuments<UserProfile>(
+      'users',
+      [where('uid', '==', recipientUid)],
+    );
+
+    // uid might be stored as doc id, not a field — try getDocument as fallback
+    let token = users[0]?.expoPushToken;
+    if (!token) {
+      const { getDocument } = await import('./firebase/firestore');
+      const user = await getDocument<UserProfile>('users', recipientUid);
+      token = user?.expoPushToken;
+    }
+
+    if (!token) return;
+
+    await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        to: token,
+        sound: 'default',
+        title,
+        body,
+        data: data || {},
+        channelId: 'messages',
+      }),
+    });
+  } catch (error) {
+    console.error('Error sending push to user:', error);
   }
 }
 
@@ -124,5 +182,61 @@ export async function sendPushToAdmins(
   } catch (error) {
     console.error('Error sending push to admins:', error);
     // Non-critical: don't throw, just log
+  }
+}
+
+/**
+ * Send push notifications to all friends of a user when they add a new pick.
+ */
+export async function sendPushToFriends(
+  userId: string,
+  title: string,
+  body: string,
+  data?: Record<string, unknown>,
+): Promise<void> {
+  try {
+    // Get all friends of this user
+    const friendDocs = await getDocuments<Friend & { id: string; userId: string }>(
+      'friends',
+      [where('userId', '==', userId)],
+    );
+
+    if (friendDocs.length === 0) return;
+
+    // Get push tokens for each friend
+    const friendUids = friendDocs.map((f) => f.uid);
+    const tokenPromises = friendUids.map(async (uid) => {
+      const users = await getDocuments<UserProfile>('users', [where('uid', '==', uid)]);
+      return users[0]?.expoPushToken;
+    });
+
+    const tokens = (await Promise.all(tokenPromises)).filter(
+      (t): t is string => !!t && t.length > 0,
+    );
+
+    if (tokens.length === 0) return;
+
+    // Build messages
+    const messages = tokens.map((token) => ({
+      to: token,
+      sound: 'default' as const,
+      title,
+      body,
+      data: data || {},
+      channelId: 'messages',
+    }));
+
+    // Send via Expo Push API
+    await fetch('https://exp.host/--/api/v2/push/send', {
+      method: 'POST',
+      headers: {
+        'Accept': 'application/json',
+        'Accept-Encoding': 'gzip, deflate',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(messages),
+    });
+  } catch (error) {
+    console.error('Error sending push to friends:', error);
   }
 }

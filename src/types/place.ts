@@ -2,16 +2,18 @@ import { GeoPoint, Timestamp } from 'firebase/firestore';
 
 export type PlaceCategory =
   | 'restaurant'
-  | 'hotel'
+  | 'lodging'
   | 'bar'
   | 'cafe'
-  | 'nature'
+  | 'club'
   | 'culture'
-  | 'shopping'
-  | 'nightlife'
+  | 'nature'
+  | 'shop'
   | 'services';
 
 export type BudgetTier = 1 | 2 | 3 | 4;
+
+export type StarRating = 1 | 2 | 3;
 
 export const BUDGET_LABELS: Record<BudgetTier, string> = {
   1: 'Budget',
@@ -25,6 +27,12 @@ export const BUDGET_ICONS: Record<BudgetTier, string> = {
   2: '$$',
   3: '$$$',
   4: '$$$$',
+};
+
+export const STAR_LABELS: Record<StarRating, string> = {
+  1: 'Solid',
+  2: 'Special',
+  3: 'Mindblowing',
 };
 
 export interface Place {
@@ -50,6 +58,11 @@ export interface Place {
   tags: string[];
   isPublic: boolean;
   budgetTier?: BudgetTier;
+  starRating?: StarRating;
+  googlePlaceId?: string;
+  // Free-text list of must-try dishes (restaurants/cafes) or
+  // cocktails/drinks (bars), entered by the recommender.
+  mustTry?: string;
 }
 
 export interface UserPlace {
@@ -96,6 +109,21 @@ export interface FeaturedPerson {
   picks?: string[];
 }
 
+export interface PickedUser {
+  id: string;
+  uid: string;
+  displayName: string;
+  username: string;
+  photoURL: string;
+  pickedAt: Timestamp;
+  pickedBy: string;
+}
+
+export interface PickedUserWithPlaces {
+  user: PickedUser;
+  topPlaces: UserPlace[];
+}
+
 export interface NewPlace {
   name: string;
   description: string;
@@ -110,6 +138,7 @@ export interface NewPlace {
   tags: string[];
   isPublic: boolean;
   budgetTier?: BudgetTier;
+  starRating?: StarRating;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,6 +156,8 @@ export interface PlaceEditableFields {
   country?: string;
   tags?: string[];
   budgetTier?: BudgetTier | null;
+  starRating?: StarRating | null;
+  mustTry?: string;
 }
 
 export type EditSuggestionStatus = 'pending' | 'approved' | 'rejected';
@@ -165,4 +196,19 @@ export interface DeletionRequest {
   status: DeletionRequestStatus;
   createdAt: Timestamp;
   reviewedBy?: string;
+}
+
+// ---------------------------------------------------------------------------
+// User Lists
+// ---------------------------------------------------------------------------
+
+export interface UserList {
+  id: string;
+  userId: string;
+  name: string;
+  description: string;
+  coverImageURL: string;
+  placeIds: string[];
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
 }

@@ -1,12 +1,15 @@
 import { create } from 'zustand';
 import { Timestamp } from 'firebase/firestore';
 import { Friend, FriendRequest } from '../types';
+import { useAuthStore } from './useAuthStore';
 import {
   getDocuments,
   createDocument,
   updateDocument,
   deleteDocument,
+  subscribeToDocuments,
   where,
+  Unsubscribe,
 } from '../services/firebase/firestore';
 
 interface FriendsState {
@@ -18,6 +21,7 @@ interface FriendsState {
 
 interface FriendsActions {
   fetchFriends: (userId: string) => Promise<void>;
+  subscribeFriends: (userId: string) => Unsubscribe;
   sendRequest: (fromUid: string, fromName: string, fromPhoto: string, toUid: string, toName: string) => Promise<void>;
   acceptRequest: (requestId: string, request: FriendRequest, acceptorName?: string, acceptorPhoto?: string) => Promise<void>;
   rejectRequest: (requestId: string) => Promise<void>;
@@ -58,6 +62,53 @@ export const useFriendsStore = create<FriendsState & FriendsActions>((set, get) 
       console.error('Error fetching friends:', error);
       set({ friends: [], requests: [], sentRequests: [], isLoading: false });
     }
+  },
+
+  subscribeFriends: (userId: string) => {
+    // Real-time subscription for friends list
+    const onSubError = (error: Error) => console.error('[subscribeFriends] listener error:', error);
+
+    const unsubFriends = subscribeToDocuments<Friend>(
+      'friends',
+      [where('userId', '==', userId)],
+      (allFriends) => {
+        const friends = allFriends.sort((a, b) => {
+          const aTime = a.addedAt?.toMillis?.() ?? 0;
+          const bTime = b.addedAt?.toMillis?.() ?? 0;
+          return bTime - aTime;
+        });
+        set({ friends });
+      },
+      onSubError,
+    );
+
+    // Real-time subscription for incoming friend requests
+    const unsubRequests = subscribeToDocuments<FriendRequest>(
+      'friendRequests',
+      [where('toUid', '==', userId)],
+      (incoming) => {
+        const requests = incoming.filter((r) => r.status === 'pending');
+        set({ requests });
+      },
+      onSubError,
+    );
+
+    // Real-time subscription for sent requests
+    const unsubSent = subscribeToDocuments<FriendRequest>(
+      'friendRequests',
+      [where('fromUid', '==', userId)],
+      (outgoing) => {
+        const sentRequests = outgoing.filter((r) => r.status === 'pending');
+        set({ sentRequests });
+      },
+      onSubError,
+    );
+
+    return () => {
+      unsubFriends();
+      unsubRequests();
+      unsubSent();
+    };
   },
 
   sendRequest: async (fromUid, fromName, fromPhoto, toUid, toName) => {
@@ -104,6 +155,18 @@ export const useFriendsStore = create<FriendsState & FriendsActions>((set, get) 
       set((state) => ({
         sentRequests: [...state.sentRequests, newRequest],
       }));
+
+      // Notify the recipient — requests used to arrive completely silently.
+      import('../services/notifications')
+        .then(({ sendPushToUser }) =>
+          sendPushToUser(
+            toUid,
+            'New Friend Request 👋',
+            `${fromName} wants to be your friend on Syrena Voyager`,
+            { type: 'friend-request', uid: fromUid },
+          ),
+        )
+        .catch(() => {});
     } catch (error) {
       console.error('Error sending friend request:', error);
       throw error;
@@ -126,12 +189,22 @@ export const useFriendsStore = create<FriendsState & FriendsActions>((set, get) 
 
       await updateDocument('friendRequests', requestId, { status: 'accepted' });
 
+      // Fetch both users' REAL usernames — deriving handles from display
+      // names left wrong @usernames in friends lists forever.
+      const { getDocument } = await import('../services/firebase/firestore');
+      const [senderDoc, acceptorDoc] = await Promise.all([
+        getDocument<any>('users', request.fromUid).catch(() => null),
+        getDocument<any>('users', request.toUid).catch(() => null),
+      ]);
+
       // Create friend doc for the ACCEPTOR (so they see the sender in their list)
       if (existingForAcceptor.length === 0) {
         const friendDataForAcceptor = {
           uid: request.fromUid,
           displayName: request.fromName,
-          username: request.fromName.toLowerCase().replace(/\s+/g, ''),
+          username:
+            senderDoc?.username ||
+            request.fromName.toLowerCase().replace(/\s+/g, ''),
           photoURL: request.fromPhoto,
           status: 'accepted' as const,
           userId: request.toUid,
@@ -151,14 +224,28 @@ export const useFriendsStore = create<FriendsState & FriendsActions>((set, get) 
       if (existingForSender.length === 0) {
         const friendDataForSender = {
           uid: request.toUid,
-          displayName: acceptorName || 'Friend',
-          username: (acceptorName || 'friend').toLowerCase().replace(/\s+/g, ''),
-          photoURL: acceptorPhoto || '',
+          displayName: acceptorDoc?.displayName || acceptorName || 'Friend',
+          username:
+            acceptorDoc?.username ||
+            (acceptorName || 'friend').toLowerCase().replace(/\s+/g, ''),
+          photoURL: acceptorDoc?.photoURL || acceptorPhoto || '',
           status: 'accepted' as const,
           userId: request.fromUid,
         };
         await createDocument('friends', friendDataForSender);
       }
+
+      // Let the sender know their request was accepted (fire-and-forget).
+      import('../services/notifications')
+        .then(({ sendPushToUser }) =>
+          sendPushToUser(
+            request.fromUid,
+            'Friend Request Accepted 🤝',
+            `${acceptorDoc?.displayName || acceptorName || 'Someone'} accepted your friend request`,
+            { type: 'friend-accepted', uid: request.toUid },
+          ),
+        )
+        .catch(() => {});
     } catch (error) {
       console.error('Error accepting friend request:', error);
       throw error;
@@ -181,13 +268,20 @@ export const useFriendsStore = create<FriendsState & FriendsActions>((set, get) 
     try {
       const { friends } = get();
       const friendObj = friends.find((f) => f.uid === friendUid) as any;
-      const myUid = friendObj?.userId || (friends[0] as any)?.userId;
+      // My uid must come from the auth store — deriving it from another
+      // friend doc breaks when the list is empty or stale.
+      const myUid: string | undefined =
+        useAuthStore.getState().user?.uid || friendObj?.userId;
+      if (!myUid) return;
 
       // Delete MY friend doc (so I no longer see them)
       if (friendObj?.id) {
         await deleteDocument('friends', friendObj.id);
       } else {
+        // CRITICAL: scope to my own docs. Without the userId filter this
+        // used to delete EVERY member's friendship with that person.
         const docs = await getDocuments<Friend>('friends', [
+          where('userId', '==', myUid),
           where('uid', '==', friendUid),
         ]);
         for (const d of docs) {

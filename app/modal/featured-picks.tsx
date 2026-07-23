@@ -6,28 +6,29 @@ import {
   TextInput,
   Pressable,
   FlatList,
-  Image,
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, fonts, spacing, radius } from '../../src/theme';
 import { usePlacesStore, useAuthStore } from '../../src/stores';
 import { Place, PlaceCategory } from '../../src/types';
+import { placeImageUri } from '../../src/utils/placeholderAvatar';
 
 const MAX_PICKS = 10;
 
 const categoryColors: Record<PlaceCategory, string> = {
   restaurant: colors.category.restaurant,
-  hotel: colors.category.hotel,
+  lodging: colors.category.lodging,
   bar: colors.category.bar,
   cafe: colors.category.cafe,
-  nature: colors.category.nature,
+  club: colors.category.club,
   culture: colors.category.culture,
-  shopping: colors.category.shopping,
-  nightlife: colors.category.nightlife,
+  nature: colors.category.nature,
+  shop: colors.category.shop,
   services: colors.category.services,
 };
 
@@ -45,27 +46,6 @@ export default function FeaturedPicksModal() {
   const isAdmin = profile?.isAdmin === true;
   const isFeaturedUser =
     (profile?.uid || (profile as any)?.id) === featuredPerson?.uid;
-
-  // Access guard
-  if (!isAdmin && !isFeaturedUser) {
-    return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <View style={styles.header}>
-          <Pressable onPress={() => router.back()}>
-            <Ionicons name="close" size={22} color={colors.text.primary} />
-          </Pressable>
-          <Text style={styles.headerTitle}>Traveler's Picks</Text>
-          <View style={{ width: 22 }} />
-        </View>
-        <View style={styles.centered}>
-          <Ionicons name="lock-closed" size={48} color={colors.gold.muted} />
-          <Text style={styles.noAccessText}>
-            Only the featured traveler or admins can edit picks
-          </Text>
-        </View>
-      </View>
-    );
-  }
 
   const [selectedIds, setSelectedIds] = useState<string[]>(
     featuredPerson?.picks || []
@@ -117,6 +97,29 @@ export default function FeaturedPicksModal() {
     setSelectedIds((prev) => prev.filter((id) => id !== placeId));
   }, []);
 
+  // Access guard — AFTER all hooks. An early return above the hooks made
+  // React throw "Rendered more hooks than during the previous render"
+  // whenever the async profile load flipped isAdmin/isFeaturedUser.
+  if (!isAdmin && !isFeaturedUser) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.header}>
+          <Pressable onPress={() => router.back()}>
+            <Ionicons name="close" size={22} color={colors.text.primary} />
+          </Pressable>
+          <Text style={styles.headerTitle}>Traveler's Picks</Text>
+          <View style={{ width: 22 }} />
+        </View>
+        <View style={styles.centered}>
+          <Ionicons name="lock-closed" size={48} color={colors.gold.muted} />
+          <Text style={styles.noAccessText}>
+            Only the featured person or admins can edit picks
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
   const handleSave = async () => {
     setIsSaving(true);
     try {
@@ -141,9 +144,7 @@ export default function FeaturedPicksModal() {
         onPress={() => togglePick(item.id)}
       >
         <Image
-          source={{
-            uri: item.imageURLs?.[0] || `https://picsum.photos/100/100?random=${item.id}`,
-          }}
+          source={{ uri: placeImageUri(item.imageURLs, item.id) }}
           style={styles.placeThumb}
         />
         <View style={styles.placeInfo}>
@@ -173,11 +174,24 @@ export default function FeaturedPicksModal() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={styles.headerIconButton}
+          accessibilityLabel="Close"
+          accessibilityRole="button"
+        >
           <Ionicons name="close" size={22} color={colors.text.primary} />
         </Pressable>
         <Text style={styles.headerTitle}>Traveler's Picks</Text>
-        <Pressable onPress={handleSave} disabled={isSaving || !hasChanges}>
+        <Pressable
+          onPress={handleSave}
+          disabled={isSaving || !hasChanges}
+          hitSlop={12}
+          style={styles.headerIconButton}
+          accessibilityLabel="Save"
+          accessibilityRole="button"
+        >
           {isSaving ? (
             <ActivityIndicator size="small" color={colors.gold.primary} />
           ) : (
@@ -208,17 +222,18 @@ export default function FeaturedPicksModal() {
             renderItem={({ item }) => (
               <View style={styles.selectedChip}>
                 <Image
-                  source={{
-                    uri:
-                      item.imageURLs?.[0] ||
-                      `https://picsum.photos/100/100?random=${item.id}`,
-                  }}
+                  source={{ uri: placeImageUri(item.imageURLs, item.id) }}
                   style={styles.selectedChipImage}
                 />
                 <Text style={styles.selectedChipName} numberOfLines={1}>
                   {item.name}
                 </Text>
-                <Pressable onPress={() => removePick(item.id)}>
+                <Pressable
+                  onPress={() => removePick(item.id)}
+                  hitSlop={12}
+                  accessibilityLabel="Remove pick"
+                  accessibilityRole="button"
+                >
                   <Ionicons
                     name="close-circle"
                     size={16}
@@ -244,7 +259,12 @@ export default function FeaturedPicksModal() {
             placeholderTextColor={colors.text.tertiary}
           />
           {searchQuery.length > 0 && (
-            <Pressable onPress={() => setSearchQuery('')}>
+            <Pressable
+              onPress={() => setSearchQuery('')}
+              hitSlop={12}
+              accessibilityLabel="Clear search"
+              accessibilityRole="button"
+            >
               <Ionicons name="close-circle" size={16} color={colors.text.tertiary} />
             </Pressable>
           )}
@@ -298,6 +318,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderBottomWidth: 0.5,
     borderBottomColor: colors.ui.border,
+  },
+  headerIconButton: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
     fontFamily: fonts.serif.bold,

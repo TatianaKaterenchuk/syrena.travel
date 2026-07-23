@@ -7,12 +7,12 @@ import {
   TextInput,
   FlatList,
   Platform,
-  Image,
   Animated,
   Dimensions,
   Keyboard,
   ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -21,7 +21,9 @@ import { colors, fonts, spacing, radius, shadows } from '../../src/theme';
 import { PlaceCategory, Place } from '../../src/types';
 import { usePlacesStore, useMapStore, useFriendsStore } from '../../src/stores';
 import { useLocation } from '../../src/hooks';
-import { CUSTOM_MAP_STYLE, CLUSTER_RADIUS } from '../../src/constants/mapConfig';
+import { placeImageUri, sizedImageUri } from '../../src/utils/placeholderAvatar';
+import DiscoveryTip from '../../src/components/onboarding/DiscoveryTip';
+import { CUSTOM_MAP_STYLE } from '../../src/constants/mapConfig';
 import {
   getPlaceDetails,
   searchPlaces,
@@ -40,37 +42,37 @@ const CARD_WIDTH = SCREEN_WIDTH - spacing.lg * 2;
 
 const categoryColors: Record<PlaceCategory, string> = {
   restaurant: colors.category.restaurant,
-  hotel: colors.category.hotel,
+  lodging: colors.category.lodging,
   bar: colors.category.bar,
   cafe: colors.category.cafe,
-  nature: colors.category.nature,
+  club: colors.category.club,
   culture: colors.category.culture,
-  shopping: colors.category.shopping,
-  nightlife: colors.category.nightlife,
+  nature: colors.category.nature,
+  shop: colors.category.shop,
   services: colors.category.services,
 };
 
-const categoryEmojis: Record<PlaceCategory, string> = {
-  restaurant: '🍽️',
-  hotel: '🏨',
-  bar: '🍸',
-  cafe: '☕',
-  nature: '🌿',
-  culture: '🏛️',
-  shopping: '🛍️',
-  nightlife: '🌙',
-  services: '🔧',
+const categoryIcons: Record<PlaceCategory, string> = {
+  restaurant: 'restaurant-outline',
+  lodging: 'bed-outline',
+  bar: 'wine-outline',
+  cafe: 'cafe-outline',
+  club: 'musical-notes-outline',
+  culture: 'compass-outline',
+  nature: 'leaf-outline',
+  shop: 'bag-outline',
+  services: 'construct-outline',
 };
 
 const categoryLabels: Record<PlaceCategory, string> = {
   restaurant: 'Restaurant',
-  hotel: 'Hotel',
+  lodging: 'Lodging',
   bar: 'Bar',
-  cafe: 'Cafe',
-  nature: 'Nature',
+  cafe: 'Café',
+  club: 'Club',
   culture: 'Culture',
-  shopping: 'Shopping',
-  nightlife: 'Nightlife',
+  nature: 'Nature',
+  shop: 'Shop',
   services: 'Services',
 };
 
@@ -78,21 +80,62 @@ const categoryLabels: Record<PlaceCategory, string> = {
 // Custom marker bubble
 // ---------------------------------------------------------------------------
 
-function CustomMarkerView({ category }: { category: PlaceCategory }) {
+const MICHELIN_RED = '#C4002F';
+
+function CustomMarkerView({ category, starRating }: { category: PlaceCategory; starRating?: number }) {
   return (
     <View style={styles.markerContainer}>
-      <View
-        style={[
-          styles.markerBubble,
-          { backgroundColor: categoryColors[category] },
-        ]}
-      >
-        <Text style={styles.markerEmoji}>{categoryEmojis[category]}</Text>
+      {starRating != null && starRating > 0 && (
+        <View style={styles.markerStars}>
+          {Array.from({ length: starRating }).map((_, i) => (
+            <Ionicons key={i} name="star" size={8} color={colors.gold.primary} />
+          ))}
+        </View>
+      )}
+      <View style={styles.markerBubble}>
+        <Ionicons name={categoryIcons[category] as any} size={16} color="#FFFFFF" />
       </View>
-      <View
-        style={[styles.markerArrow, { borderTopColor: categoryColors[category] }]}
-      />
+      <View style={styles.markerArrow} />
     </View>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Place marker wrapper – briefly enables tracksViewChanges on mount so the
+// native side picks up the correct custom view, then disables it for perf.
+// ---------------------------------------------------------------------------
+
+function PlaceMarker({
+  place,
+  MarkerComponent,
+  onPress,
+}: {
+  place: Place;
+  MarkerComponent: any;
+  onPress: () => void;
+}) {
+  const [trackChanges, setTrackChanges] = useState(true);
+
+  useEffect(() => {
+    // After the marker has rendered its custom view, stop tracking for perf
+    const timer = setTimeout(() => setTrackChanges(false), 500);
+    return () => clearTimeout(timer);
+  }, []);
+
+  // Guard against malformed Firestore docs missing `location`
+  if (!place.location) return null;
+
+  return (
+    <MarkerComponent
+      coordinate={{
+        latitude: place.location.latitude,
+        longitude: place.location.longitude,
+      }}
+      onPress={onPress}
+      tracksViewChanges={trackChanges}
+    >
+      <CustomMarkerView category={place.category} starRating={place.starRating} />
+    </MarkerComponent>
   );
 }
 
@@ -143,9 +186,7 @@ function PlaceCard({
           <Image source={{ uri: thumbnail }} style={styles.cardImage} />
         ) : (
           <View style={[styles.cardImage, styles.cardImagePlaceholder]}>
-            <Text style={{ fontSize: 24 }}>
-              {categoryEmojis[place.category]}
-            </Text>
+            <Ionicons name={categoryIcons[place.category] as any} size={24} color={categoryColors[place.category]} />
           </View>
         )}
 
@@ -233,7 +274,7 @@ function PlaceCard({
       </Pressable>
 
       {/* Close */}
-      <Pressable style={styles.cardClose} onPress={onClose}>
+      <Pressable style={styles.cardClose} onPress={onClose} hitSlop={12}>
         <Ionicons name="close" size={16} color={colors.text.tertiary} />
       </Pressable>
     </Animated.View>
@@ -272,9 +313,9 @@ function PoiPreviewCard({
   const inferredCategory = details
     ? mapGoogleTypesToCategory(details.types, details.primaryType)
     : null;
-  const categoryEmoji = inferredCategory
-    ? categoryEmojis[inferredCategory as PlaceCategory] || '📍'
-    : '📍';
+  const categoryIcon = inferredCategory
+    ? categoryIcons[inferredCategory as PlaceCategory] || 'location-outline'
+    : 'location-outline';
   const categoryLabel = inferredCategory
     ? categoryLabels[inferredCategory as PlaceCategory] || 'Place'
     : 'Place';
@@ -302,7 +343,7 @@ function PoiPreviewCard({
           <Image source={{ uri: thumbnail }} style={styles.cardImage} />
         ) : (
           <View style={[styles.cardImage, styles.cardImagePlaceholder]}>
-            <Text style={{ fontSize: 24 }}>{categoryEmoji}</Text>
+            <Ionicons name={categoryIcon as any} size={24} color={categoryColor} />
           </View>
         )}
 
@@ -364,7 +405,7 @@ function PoiPreviewCard({
       </View>
 
       {/* Close */}
-      <Pressable style={styles.cardClose} onPress={onClose}>
+      <Pressable style={styles.cardClose} onPress={onClose} hitSlop={12}>
         <Ionicons name="close" size={16} color={colors.text.tertiary} />
       </Pressable>
     </Animated.View>
@@ -406,9 +447,7 @@ function WebMapFallback({ places }: { places: Place[] }) {
                 { backgroundColor: categoryColors[place.category] },
               ]}
             >
-              <Text style={{ fontSize: 12 }}>
-                {categoryEmojis[place.category]}
-              </Text>
+              <Ionicons name={categoryIcons[place.category] as any} size={12} color="#FFFFFF" />
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.webPlaceName}>{place.name}</Text>
@@ -466,9 +505,12 @@ interface NativeMapProps {
   places: Place[];
   userLocation: { latitude: number; longitude: number } | null;
   mapRef: React.MutableRefObject<any>;
+  /** Reports whether a bottom card (place/POI/temp pin) is showing, so the
+      parent can lift its FABs clear of the card's close button. */
+  onCardVisibilityChange?: (visible: boolean) => void;
 }
 
-function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
+function NativeMap({ places, userLocation, mapRef, onCardVisibilityChange }: NativeMapProps) {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const { beenPlaceIds, toggleBeen } = usePlacesStore();
@@ -484,6 +526,11 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
   const [isLoadingPoi, setIsLoadingPoi] = useState(false);
   const [showPoiCard, setShowPoiCard] = useState(false);
 
+  // Tell the parent when any bottom card is visible (FABs move out of the way)
+  useEffect(() => {
+    onCardVisibilityChange?.(!!selectedPlace || showPoiCard || !!tempMarker);
+  }, [selectedPlace, showPoiCard, tempMarker, onCardVisibilityChange]);
+
   // Search overlay state
   const [searchExpanded, setSearchExpanded] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -494,9 +541,13 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
   const debounceRef = useRef<NodeJS.Timeout | null>(null);
   const searchInputRef = useRef<TextInput>(null);
 
-  // Compute initial region: user location > first place > Warsaw default
+  const hasAnimatedToUser = useRef(false);
+
+  // Compute initial region: first place > Warsaw default
+  // (userLocation usually arrives after mount, so we animate to it below)
   const initialRegion = useMemo(() => {
     if (userLocation) {
+      hasAnimatedToUser.current = true;
       return {
         latitude: userLocation.latitude,
         longitude: userLocation.longitude,
@@ -504,8 +555,8 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
         longitudeDelta: 0.04,
       };
     }
-    const firstPlace = places[0];
-    if (firstPlace) {
+    const firstPlace = places.find((p) => !!p.location);
+    if (firstPlace && firstPlace.location) {
       return {
         latitude: firstPlace.location.latitude,
         longitude: firstPlace.location.longitude,
@@ -519,7 +570,23 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
       latitudeDelta: 0.08,
       longitudeDelta: 0.08,
     };
-  }, [userLocation, places]);
+  }, []);
+
+  // When user location arrives after mount, animate to it
+  useEffect(() => {
+    if (userLocation && !hasAnimatedToUser.current && mapRef.current) {
+      hasAnimatedToUser.current = true;
+      mapRef.current.animateToRegion(
+        {
+          latitude: userLocation.latitude,
+          longitude: userLocation.longitude,
+          latitudeDelta: 0.04,
+          longitudeDelta: 0.04,
+        },
+        600,
+      );
+    }
+  }, [userLocation]);
 
   if (!NativeMapView || !NativeMarker) return <WebMapFallback places={places} />;
 
@@ -536,6 +603,8 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
     setSelectedPlace(place);
     setTempMarker(null);
     dismissPoi();
+
+    if (!place.location) return;
 
     mapRef.current?.animateToRegion(
       {
@@ -803,6 +872,12 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
 
   return (
     <>
+      <DiscoveryTip
+        id="map-poi"
+        icon="map"
+        title="Browse like Google Maps"
+        text="Zoom in to see restaurants, bars and hotels by name — tap any of them to add it as a recommendation."
+      />
       <MapViewComponent
         ref={mapRef}
         style={styles.map}
@@ -811,30 +886,24 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
         {...(isGoogleMapsAvailable ? { provider: PROVIDER_GOOGLE } : {})}
         showsUserLocation
         showsMyLocationButton={false}
-        showsPointsOfInterest={false}
-        userInterfaceStyle="dark"
-        customMapStyle={isGoogleMapsAvailable ? CUSTOM_MAP_STYLE : undefined}
+        // Show Google's own POI markers (restaurants, hotels, cafes) with
+        // their names so users can browse the map like Google Maps and tap
+        // any place to add it. No custom style — vanilla Google Maps.
+        showsPointsOfInterest={true}
         onLongPress={handleLongPress}
         onPress={handleMapPress}
         onPoiClick={handlePoiClick}
-        clusterColor={colors.gold.primary}
-        clusterTextColor={colors.background.primary}
-        radius={CLUSTER_RADIUS}
+        clusteringEnabled={false}
         minZoomLevel={2}
         maxZoomLevel={20}
       >
         {places.map((place) => (
-          <MarkerComponent
-            key={place.id}
-            coordinate={{
-              latitude: place.location.latitude,
-              longitude: place.location.longitude,
-            }}
+          <PlaceMarker
+            key={`${place.id}_${place.category}_${place.starRating ?? 0}`}
+            place={place}
+            MarkerComponent={MarkerComponent}
             onPress={() => handleMarkerPress(place)}
-            tracksViewChanges={false}
-          >
-            <CustomMarkerView category={place.category} />
-          </MarkerComponent>
+          />
         ))}
 
         {/* Temporary marker from long-press */}
@@ -845,7 +914,7 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
           >
             <View style={styles.tempMarkerContainer}>
               <View style={styles.tempMarkerBubble}>
-                <Ionicons name="add" size={20} color="#FFFFFF" />
+                <Ionicons name="add" size={18} color="#FFFFFF" />
               </View>
               <View style={styles.tempMarkerArrow} />
             </View>
@@ -911,13 +980,7 @@ function NativeMap({ places, userLocation, mapRef }: NativeMapProps) {
                     }
                   }}
                 >
-                  {p.imageURLs?.[0] ? (
-                    <Image source={{ uri: p.imageURLs[0] }} style={styles.searchResultImage} />
-                  ) : (
-                    <View style={[styles.searchResultImage, styles.searchResultImagePlaceholder]}>
-                      <Ionicons name="location" size={18} color={colors.text.tertiary} />
-                    </View>
-                  )}
+                  <Image source={{ uri: sizedImageUri(placeImageUri(p.imageURLs, p.id), 200) }} style={styles.searchResultImage} />
                   <View style={styles.searchResultInfo}>
                     <Text style={styles.searchResultName} numberOfLines={1}>{p.name}</Text>
                     <View style={styles.searchResultMeta}>
@@ -1132,9 +1195,11 @@ export default function MapScreen() {
   const [hintDismissed, setHintDismissed] = useState(false);
 
   const { places, beenPlaceIds, fetchPlaces, fetchBeenPlaces, toggleBeen } = usePlacesStore();
-  const { activeFilters, activeBudgetFilters, selectedFriendId, friendPlaceIds, clearFriendFilter } = useMapStore();
+  const { activeFilters, activeBudgetFilters, activeStarFilters, selectedFriendId, friendPlaceIds, clearFriendFilter } = useMapStore();
   const { friends } = useFriendsStore();
   const { location, requestLocation } = useLocation();
+  // True while NativeMap shows a bottom card — lifts the FABs above it.
+  const [cardOpen, setCardOpen] = useState(false);
 
   const selectedFriend = selectedFriendId
     ? friends.find((f) => f.uid === selectedFriendId)
@@ -1145,7 +1210,7 @@ export default function MapScreen() {
     fetchBeenPlaces();
   }, [fetchPlaces]);
 
-  // Filter places by active categories, budget tiers, and friend from the map filter store
+  // Filter places by active categories, budget tiers, star ratings, and friend from the map filter store
   const filteredPlaces = useMemo(() => {
     if (activeFilters.length === 0) return [];
     let result = places;
@@ -1155,13 +1220,16 @@ export default function MapScreen() {
     if (activeBudgetFilters.length < 4 && activeBudgetFilters.length > 0) {
       result = result.filter((p) => !p.budgetTier || activeBudgetFilters.includes(p.budgetTier));
     }
+    if (activeStarFilters.length < 3 && activeStarFilters.length > 0) {
+      result = result.filter((p) => !p.starRating || activeStarFilters.includes(p.starRating));
+    }
     if (selectedFriendId) {
       if (friendPlaceIds.length === 0) return [];
       const friendSet = new Set(friendPlaceIds);
       result = result.filter((p) => friendSet.has(p.id));
     }
     return result;
-  }, [places, activeFilters, activeBudgetFilters, selectedFriendId, friendPlaceIds]);
+  }, [places, activeFilters, activeBudgetFilters, activeStarFilters, selectedFriendId, friendPlaceIds]);
 
   // Whether filters are actively narrowed
   const hasActiveFilter = activeFilters.length < 8 && activeFilters.length > 0 || !!selectedFriendId;
@@ -1191,11 +1259,16 @@ export default function MapScreen() {
           places={filteredPlaces}
           userLocation={location}
           mapRef={mapRef}
+          onCardVisibilityChange={setCardOpen}
         />
       )}
 
-      {/* Header Overlay */}
-      <View style={[styles.headerOverlay, { paddingTop: insets.top + 8 }]}>
+      {/* Header Overlay — pointerEvents="box-none" so the empty band between
+          buttons doesn't block map gestures (pinch, scroll, marker taps). */}
+      <View
+        style={[styles.headerOverlay, { paddingTop: insets.top + 8 }]}
+        pointerEvents="box-none"
+      >
         <Pressable style={styles.headerButton} onPress={() => router.back()}>
           <Ionicons name="arrow-back" size={22} color={colors.text.primary} />
         </Pressable>
@@ -1249,26 +1322,30 @@ export default function MapScreen() {
         </View>
       )}
 
-      {/* FABs — native only */}
-      {Platform.OS !== 'web' && (
-        <>
-          {/* Add Place FAB */}
-          <Pressable
-            style={[styles.fab, { bottom: 156 + insets.bottom }]}
-            onPress={() => router.push('/modal/add-place')}
-          >
-            <Ionicons name="add" size={24} color={colors.gold.primary} />
-          </Pressable>
+      {/* FABs — native only. When a place/POI card is open at the bottom,
+          lift the FABs above it so they never overlap the card's close X. */}
+      {Platform.OS !== 'web' && (() => {
+        const lift = cardOpen ? 170 : 0;
+        return (
+          <>
+            {/* Add Place FAB */}
+            <Pressable
+              style={[styles.fab, { bottom: 156 + lift + insets.bottom }]}
+              onPress={() => router.push('/modal/add-place')}
+            >
+              <Ionicons name="add" size={24} color={colors.gold.primary} />
+            </Pressable>
 
-          {/* Location FAB */}
-          <Pressable
-            style={[styles.fab, { bottom: 100 + insets.bottom }]}
-            onPress={goToCurrentLocation}
-          >
-            <Ionicons name="locate" size={22} color={colors.gold.primary} />
-          </Pressable>
-        </>
-      )}
+            {/* Location FAB */}
+            <Pressable
+              style={[styles.fab, { bottom: 100 + lift + insets.bottom }]}
+              onPress={goToCurrentLocation}
+            >
+              <Ionicons name="locate" size={22} color={colors.gold.primary} />
+            </Pressable>
+          </>
+        );
+      })()}
 
       {/* Long-press hint — shown only when no places exist, tap to dismiss */}
       {filteredPlaces.length === 0 && Platform.OS !== 'web' && !hintDismissed && (
@@ -1327,7 +1404,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingVertical: 6,
     borderRadius: radius.full,
-    backgroundColor: colors.gold.primary + '25',
+    backgroundColor: colors.background.primary + 'DD',
     borderWidth: 1,
     borderColor: colors.gold.primary + '50',
   },
@@ -1348,11 +1425,14 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontFamily: fonts.serif.bold,
-    fontSize: 18,
+    fontSize: 16,
     color: colors.text.primary,
-    textShadowColor: 'rgba(0,0,0,0.5)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
+    backgroundColor: colors.background.primary + 'DD',
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    overflow: 'hidden',
+    letterSpacing: 0.5,
   },
   headerRight: {
     flexDirection: 'row',
@@ -1397,43 +1477,53 @@ const styles = StyleSheet.create({
     borderColor: colors.gold.primary,
   },
 
-  // Markers
+  // Markers — Michelin Guide style (solid red pin with white icon)
   markerContainer: {
     alignItems: 'center',
   },
+  markerStars: {
+    flexDirection: 'row',
+    gap: 1,
+    marginBottom: 2,
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 4,
+    paddingVertical: 1,
+    borderRadius: 6,
+    borderWidth: 0.5,
+    borderColor: '#D0D0D0',
+  },
   markerBubble: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#C4002F',
     borderWidth: 2.5,
     borderColor: '#FFFFFF',
-    ...shadows.sm,
-  },
-  markerEmoji: {
-    fontSize: 18,
+    ...shadows.md,
   },
   markerArrow: {
     width: 0,
     height: 0,
-    borderLeftWidth: 7,
-    borderRightWidth: 7,
-    borderTopWidth: 9,
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderTopWidth: 8,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
-    marginTop: -1,
+    borderTopColor: '#C4002F',
+    marginTop: -2,
   },
 
-  // Temp marker (long-press)
+  // Temp marker (long-press) — red pin with gold plus icon
   tempMarkerContainer: {
     alignItems: 'center',
   },
   tempMarkerBubble: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.gold.primary,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#C4002F',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2.5,
@@ -1443,13 +1533,13 @@ const styles = StyleSheet.create({
   tempMarkerArrow: {
     width: 0,
     height: 0,
-    borderLeftWidth: 7,
-    borderRightWidth: 7,
-    borderTopWidth: 9,
+    borderLeftWidth: 6,
+    borderRightWidth: 6,
+    borderTopWidth: 8,
     borderLeftColor: 'transparent',
     borderRightColor: 'transparent',
-    borderTopColor: colors.gold.primary,
-    marginTop: -1,
+    borderTopColor: '#C4002F',
+    marginTop: -2,
   },
 
   // FABs
@@ -1477,6 +1567,7 @@ const styles = StyleSheet.create({
   cardContainer: {
     width: CARD_WIDTH,
     maxWidth: 420,
+    ...shadows.md,
   },
   cardGoldAccent: {
     height: 2,
@@ -1584,13 +1675,14 @@ const styles = StyleSheet.create({
   cardClose: {
     position: 'absolute',
     top: 8,
-    right: 6,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    right: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: colors.background.tertiary,
     justifyContent: 'center',
     alignItems: 'center',
+    zIndex: 5,
   },
   poiAddButton: {
     width: 36,

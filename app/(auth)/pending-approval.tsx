@@ -6,8 +6,9 @@ import {
   Pressable,
   ActivityIndicator,
   Animated,
-  Image,
+  Alert,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -25,6 +26,7 @@ export default function PendingApprovalScreen() {
   const refreshProfile = useAuthStore((s) => s.refreshProfile);
 
   const isRejected = profile?.status === 'rejected';
+  const isBanned = profile?.status === 'banned';
 
   // Animations
   const floatAnim = useRef(new Animated.Value(0)).current;
@@ -85,6 +87,14 @@ export default function PendingApprovalScreen() {
     setIsRefreshing(true);
     try {
       await refreshProfile();
+      // The approved case redirects via the isApproved effect. If we're
+      // still pending, say so — the button used to give zero feedback.
+      if (!useAuthStore.getState().isApproved) {
+        Alert.alert(
+          'Still Under Review',
+          "Your membership hasn't been approved yet. We'll notify you as soon as it is!",
+        );
+      }
     } finally {
       setIsRefreshing(false);
     }
@@ -103,7 +113,7 @@ export default function PendingApprovalScreen() {
           <Image
             source={require('../../assets/images/mermaid.png')}
             style={styles.mermaidImage}
-            resizeMode="contain"
+            contentFit="contain"
           />
         </Animated.View>
 
@@ -113,7 +123,7 @@ export default function PendingApprovalScreen() {
           <Text style={styles.diamond}>✦</Text>
           <Animated.View style={[styles.dividerLine, { opacity: shimmerAnim }]} />
         </View>
-        <Text style={styles.subtitle}>TRAVEL</Text>
+        <Text style={styles.subtitle}>VOYAGER</Text>
       </Animated.View>
 
       {/* Status Card */}
@@ -123,18 +133,20 @@ export default function PendingApprovalScreen() {
         <View style={styles.statusContent}>
           <View style={styles.statusIconRing}>
             <Ionicons
-              name={isRejected ? 'close-circle' : 'hourglass'}
+              name={isBanned ? 'ban' : isRejected ? 'close-circle' : 'hourglass'}
               size={32}
-              color={isRejected ? colors.ui.error : colors.gold.primary}
+              color={isBanned || isRejected ? colors.ui.error : colors.gold.primary}
             />
           </View>
 
           <Text style={styles.statusTitle}>
-            {isRejected ? 'Account Not Approved' : 'Account Under Review'}
+            {isBanned ? 'Account Banned' : isRejected ? 'Account Not Approved' : 'Account Under Review'}
           </Text>
 
           <Text style={styles.statusMessage}>
-            {isRejected
+            {isBanned
+              ? 'Your account has been banned. If you believe this is a mistake, please contact the community admin.'
+              : isRejected
               ? 'Unfortunately, your account was not approved. Please contact the community admin for more information.'
               : 'Your account is being reviewed by our admin. You\'ll get access once approved.'}
           </Text>
@@ -151,7 +163,7 @@ export default function PendingApprovalScreen() {
 
       {/* Actions */}
       <Animated.View style={[styles.actions, { opacity: fadeAnim }]}>
-        {!isRejected && (
+        {!isRejected && !isBanned && (
           <Pressable
             style={styles.refreshButton}
             onPress={handleRefresh}

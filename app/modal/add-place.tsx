@@ -7,18 +7,19 @@ import {
   Pressable,
   ScrollView,
   FlatList,
-  Image,
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { Image } from 'expo-image';
+import { Image as RNImage } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { GeoPoint, Timestamp } from 'firebase/firestore';
 import { colors, fonts, spacing, radius } from '../../src/theme';
-import { PlaceCategory, Place, UserPlace, BudgetTier, BUDGET_LABELS, BUDGET_ICONS } from '../../src/types';
+import { PlaceCategory, Place, UserPlace, BudgetTier, StarRating, BUDGET_LABELS, BUDGET_ICONS, STAR_LABELS } from '../../src/types';
 import { pickImage, takePhoto } from '../../src/utils/imagePicker';
 import { uploadImage } from '../../src/services/firebase/storage';
 import { usePlacesStore } from '../../src/stores/usePlacesStore';
@@ -32,17 +33,20 @@ import {
   PlacePhoto,
   GooglePlaceSearchResult,
 } from '../../src/services/googlePlaces';
+import * as Haptics from 'expo-haptics';
 import { useLocation } from '../../src/hooks/useLocation';
 import { generateTags, expandManualTags } from '../../src/utils/generateTags';
 
-const CATEGORIES: { key: PlaceCategory; label: string; emoji: string }[] = [
-  { key: 'restaurant', label: 'Eat', emoji: '🍽️' },
-  { key: 'hotel', label: 'Stay', emoji: '🏨' },
-  { key: 'bar', label: 'Bar', emoji: '🍸' },
-  { key: 'culture', label: 'Do', emoji: '🎯' },
-  { key: 'nature', label: 'Nature', emoji: '🌿' },
-  { key: 'shopping', label: 'Shopping', emoji: '🛍️' },
-  { key: 'services', label: 'Services', emoji: '🔧' },
+const CATEGORIES: { key: PlaceCategory; label: string; icon: string }[] = [
+  { key: 'restaurant', label: 'Eat', icon: 'restaurant-outline' },
+  { key: 'lodging', label: 'Stay', icon: 'bed-outline' },
+  { key: 'bar', label: 'Bar', icon: 'wine-outline' },
+  { key: 'cafe', label: 'Café', icon: 'cafe-outline' },
+  { key: 'club', label: 'Club', icon: 'musical-notes-outline' },
+  { key: 'culture', label: 'Culture', icon: 'color-palette-outline' },
+  { key: 'nature', label: 'Nature', icon: 'leaf-outline' },
+  { key: 'shop', label: 'Shop', icon: 'bag-outline' },
+  { key: 'services', label: 'Services', icon: 'construct-outline' },
 ];
 
 const BUDGET_TIERS: { key: BudgetTier; label: string; icon: string }[] = [
@@ -57,6 +61,7 @@ export default function AddPlaceModal() {
   const insets = useSafeAreaInsets();
   const addPlace = usePlacesStore((s) => s.addPlace);
   const savePlace = usePlacesStore((s) => s.savePlace);
+  const allPlaces = usePlacesStore((s) => s.places);
   const user = useAuthStore((s) => s.user);
   const profile = useAuthStore((s) => s.profile);
 
@@ -98,6 +103,7 @@ export default function AddPlaceModal() {
   // ---------- Form state ----------
   const [name, setName] = useState(params.poiName || '');
   const [description, setDescription] = useState('');
+  const [mustTry, setMustTry] = useState('');
   const [selectedCategory, setSelectedCategory] =
     useState<PlaceCategory | null>(
       (params.poiCategory as PlaceCategory) || null,
@@ -108,8 +114,29 @@ export default function AddPlaceModal() {
   const [manualTags, setManualTags] = useState<string[]>([]);
   const [tagInput, setTagInput] = useState('');
   const [selectedBudget, setSelectedBudget] = useState<BudgetTier | null>(null);
+  const [selectedStars, setSelectedStars] = useState<StarRating | null>(null);
   const [photos, setPhotos] = useState<string[]>(poiPhotoUrls);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [photoAspects, setPhotoAspects] = useState<Record<string, number>>({});
+
+  // Measure aspect ratio when photos change (RNImage.getSize — expo-image
+  // has no getSize static; the RN one works for both remote and local URIs)
+  useEffect(() => {
+    photos.forEach((uri) => {
+      if (!photoAspects[uri]) {
+        RNImage.getSize(
+          uri,
+          (w: number, h: number) => {
+            setPhotoAspects((prev) => ({ ...prev, [uri]: w / h }));
+          },
+          () => {
+            // Fallback to 4:3 if can't measure
+            setPhotoAspects((prev) => ({ ...prev, [uri]: 4 / 3 }));
+          },
+        );
+      }
+    });
+  }, [photos]);
 
   // Track which photo URIs are remote URLs (Google Places) vs local files
   const [remotePhotoUrls, setRemotePhotoUrls] = useState<Set<string>>(
@@ -129,6 +156,8 @@ export default function AddPlaceModal() {
 
   const handleNameChange = useCallback((text: string) => {
     setName(text);
+    // Clear the linked place when user edits the name
+    setSelectedGooglePlaceId(null);
 
     // Don't search if we already have a POI or if text is too short
     if (isPoiPrefilled || text.trim().length < 3) {
@@ -337,12 +366,12 @@ export default function AddPlaceModal() {
   );
 
   // ---------- Camera / Library ----------
-  const handleAddPhoto = () => {
+  const showSourcePicker = (aspect: [number, number] | undefined) => {
     Alert.alert('Add Photo', 'Choose a source', [
       {
         text: 'Photo Library',
         onPress: async () => {
-          const uri = await pickImage();
+          const uri = await pickImage(aspect);
           if (uri) {
             setPhotos((prev) => [...prev, uri]);
           }
@@ -351,7 +380,7 @@ export default function AddPlaceModal() {
       {
         text: 'Camera',
         onPress: async () => {
-          const uri = await takePhoto();
+          const uri = await takePhoto(aspect);
           if (uri) {
             setPhotos((prev) => [...prev, uri]);
           }
@@ -359,6 +388,12 @@ export default function AddPlaceModal() {
       },
       { text: 'Cancel', style: 'cancel' },
     ]);
+  };
+
+  const handleAddPhoto = () => {
+    // One tap fewer: free-form crop by default instead of asking for an
+    // aspect ratio first (that extra Alert made adding photos feel clunky).
+    showSourcePicker(undefined);
   };
 
   const handleRemovePhoto = (index: number) => {
@@ -384,6 +419,17 @@ export default function AddPlaceModal() {
     }
   };
 
+  const handleMovePhoto = (index: number, direction: 'left' | 'right') => {
+    const newIndex = direction === 'left' ? index - 1 : index + 1;
+    if (newIndex < 0 || newIndex >= photos.length) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setPhotos((prev) => {
+      const updated = [...prev];
+      [updated[index], updated[newIndex]] = [updated[newIndex], updated[index]];
+      return updated;
+    });
+  };
+
   // ---------- Submit ----------
   const handleSubmit = async () => {
     if (!name.trim() || !selectedCategory || !city.trim()) {
@@ -394,28 +440,85 @@ export default function AddPlaceModal() {
       return;
     }
 
+    if (!selectedGooglePlaceId && !isPoiPrefilled) {
+      Alert.alert(
+        'Select a Place',
+        'Please search and select an actual place from the suggestions.',
+      );
+      return;
+    }
+
     if (!user || !profile) {
       Alert.alert('Not Signed In', 'Please sign in to add a place.');
+      return;
+    }
+
+    // Check for duplicate place
+    const duplicate = allPlaces.find((p) =>
+      (selectedGooglePlaceId && p.googlePlaceId === selectedGooglePlaceId) ||
+      (p.name.toLowerCase().trim() === name.trim().toLowerCase() &&
+       p.city.toLowerCase().trim() === city.trim().toLowerCase())
+    );
+    if (duplicate) {
+      Alert.alert(
+        'Already Added',
+        `${duplicate.name} was already added by ${duplicate.createdByName || 'someone'}. You can find it in the app and save it to your favorites.`,
+        [
+          { text: 'View Place', onPress: () => router.replace({ pathname: '/modal/place-detail', params: { id: duplicate.id } } as any) },
+          { text: 'Cancel', style: 'cancel' },
+        ],
+      );
       return;
     }
 
     setIsSubmitting(true);
 
     try {
-      // Upload images to Firebase Storage (skip remote URLs — store directly)
-      const imageURLs: string[] = [];
-      for (let i = 0; i < photos.length; i++) {
-        const photoUri = photos[i];
-        if (remotePhotoUrls.has(photoUri)) {
-          // Google Places URL — use directly
-          imageURLs.push(photoUri);
-        } else {
-          // Local file — upload to Firebase Storage
-          const storagePath = `places/${user.uid}/${Date.now()}_${i}.jpg`;
-          const downloadURL = await uploadImage(storagePath, photoUri);
-          imageURLs.push(downloadURL);
+      // No photos on the place yet? Try one last automatic Google Places lookup
+      // so the place always ends up with at least one image. This kicks in when
+      // the user typed the name manually and never tapped a suggestion.
+      let effectivePhotos = photos;
+      if (effectivePhotos.length === 0 && name.trim().length > 0) {
+        try {
+          const fallback = await searchPlacePhotos(
+            `${name.trim()}${city ? ` ${city.trim()}` : ''}`.trim(),
+            finalLat ?? undefined,
+            finalLng ?? undefined,
+          );
+          if (fallback.length > 0) {
+            effectivePhotos = fallback.slice(0, 5).map((p) => p.url);
+          }
+        } catch {
+          // Silent — if Google fails, we just save the place with no photo.
+          // The Explore tab has a placeholder fallback anyway.
         }
       }
+
+      // For LOCAL photos (picked from the user's library) we upload to Firebase
+      // Storage. For REMOTE photos (Google Places CDN URLs) we save the URL
+      // as-is — they're already public, and trying to round-trip them through
+      // Firebase Storage used to silently fail and leave the place with no
+      // imageURLs at all. Keeping them as direct URLs is faster too.
+      // Uploads run in PARALLEL — serial awaits made saving painfully slow.
+      const uploadBatch = Date.now();
+      const imageURLs = (
+        await Promise.all(
+          effectivePhotos.map(async (photoUri, i) => {
+            if (remotePhotoUrls.has(photoUri) || /^https?:\/\//i.test(photoUri)) {
+              return photoUri; // Remote URL — save directly
+            }
+            try {
+              const storagePath = `places/${user.uid}/${uploadBatch}_${i}.jpg`;
+              return await uploadImage(storagePath, photoUri);
+            } catch (uploadErr) {
+              // Don't let a single failed local upload kill the whole save —
+              // skip the bad photo and keep going. The place gets the rest.
+              console.warn('[add-place] failed to upload photo', i, uploadErr);
+              return null;
+            }
+          }),
+        )
+      ).filter((u): u is string => !!u);
 
       // Merge auto-generated tags + expanded manual tags
       const expandedManual = expandManualTags(manualTags);
@@ -447,6 +550,9 @@ export default function AddPlaceModal() {
         tags: allTags,
         isPublic: true,
         ...(selectedBudget ? { budgetTier: selectedBudget } : {}),
+        ...(selectedStars ? { starRating: selectedStars } : {}),
+        ...(selectedGooglePlaceId ? { googlePlaceId: selectedGooglePlaceId } : {}),
+        ...(mustTry.trim() ? { mustTry: mustTry.trim() } : {}),
       };
 
       const firestoreId = await addPlace(newPlace);
@@ -465,6 +571,7 @@ export default function AddPlaceModal() {
         placeCountry: newPlace.country,
         savedAt: now,
         isCreator: true,
+        isFavorite: true,
         personalNote: '',
         placeCreatedBy: user.uid,
         placeCreatedByName: profile.displayName,
@@ -472,9 +579,9 @@ export default function AddPlaceModal() {
       };
       await savePlace(userPlace);
 
-      Alert.alert('Success', 'Place added successfully!', [
-        { text: 'OK', onPress: () => router.back() },
-      ]);
+      // Success: haptic + straight back. No blocking "OK" alert.
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.back();
     } catch (error) {
       const message =
         error instanceof Error
@@ -611,9 +718,13 @@ export default function AddPlaceModal() {
             <Ionicons name="camera" size={24} color={colors.gold.primary} />
             <Text style={styles.addPhotoText}>ADD</Text>
           </Pressable>
-          {photos.map((uri, i) => (
+          {photos.map((uri, i) => {
+            const aspect = photoAspects[uri] || 4 / 3;
+            const THUMB_H = 100;
+            const thumbW = Math.round(THUMB_H * Math.max(0.6, Math.min(aspect, 1.8)));
+            return (
             <View key={`${uri}-${i}`} style={styles.photoContainer}>
-              <Image source={{ uri }} style={styles.photoThumb} />
+              <Image source={{ uri }} style={[styles.photoThumb, { width: thumbW, height: THUMB_H }]} />
               <Pressable
                 style={styles.removePhotoButton}
                 onPress={() => handleRemovePhoto(i)}
@@ -624,8 +735,32 @@ export default function AddPlaceModal() {
                   color={colors.text.primary}
                 />
               </Pressable>
+              {photos.length > 1 && (
+                <View style={styles.reorderBar}>
+                  {i > 0 && (
+                    <Pressable
+                      style={styles.reorderArrow}
+                      onPress={() => handleMovePhoto(i, 'left')}
+                      hitSlop={6}
+                    >
+                      <Ionicons name="chevron-back" size={14} color={colors.text.primary} />
+                    </Pressable>
+                  )}
+                  <Text style={styles.photoIndex}>{i + 1}</Text>
+                  {i < photos.length - 1 && (
+                    <Pressable
+                      style={styles.reorderArrow}
+                      onPress={() => handleMovePhoto(i, 'right')}
+                      hitSlop={6}
+                    >
+                      <Ionicons name="chevron-forward" size={14} color={colors.text.primary} />
+                    </Pressable>
+                  )}
+                </View>
+              )}
             </View>
-          ))}
+          );
+          })}
         </ScrollView>
 
         {/* ---- Search Images (Google Places) ---- */}
@@ -663,14 +798,14 @@ export default function AddPlaceModal() {
         )}
 
         {/* ---- Name (with Google Places autocomplete) ---- */}
-        <Text style={styles.label}>NAME *</Text>
+        <Text style={styles.label}>PLACE *</Text>
         <TextInput
-          style={styles.input}
+          style={[styles.input, selectedGooglePlaceId ? styles.inputLinked : null]}
           value={name}
           onChangeText={handleNameChange}
           placeholder="Search for a place..."
           placeholderTextColor={colors.text.tertiary}
-          editable={!isSubmitting}
+          editable={!isSubmitting && !isPoiPrefilled}
           onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
         />
         {/* Google Places suggestions */}
@@ -713,12 +848,19 @@ export default function AddPlaceModal() {
             ) : null}
           </View>
         )}
-        {selectedGooglePlaceId && (
+        {selectedGooglePlaceId || isPoiPrefilled ? (
           <View style={styles.linkedPlaceIndicator}>
             <Ionicons name="checkmark-circle" size={14} color={colors.ui.success} />
             <Text style={styles.linkedPlaceText}>Linked to Google Maps</Text>
           </View>
-        )}
+        ) : name.trim().length > 0 && !showSuggestions ? (
+          <View style={styles.linkedPlaceIndicator}>
+            <Ionicons name="alert-circle-outline" size={14} color={colors.ui.warning} />
+            <Text style={[styles.linkedPlaceText, { color: colors.ui.warning }]}>
+              Select a place from the suggestions above
+            </Text>
+          </View>
+        ) : null}
 
         {/* ---- Category ---- */}
         <Text style={styles.label}>CATEGORY *</Text>
@@ -733,7 +875,7 @@ export default function AddPlaceModal() {
               onPress={() => setSelectedCategory(cat.key)}
               disabled={isSubmitting}
             >
-              <Text style={styles.categoryEmoji}>{cat.emoji}</Text>
+              <Ionicons name={cat.icon as any} size={14} color={selectedCategory === cat.key ? colors.gold.primary : colors.text.secondary} />
               <Text
                 style={[
                   styles.categoryLabel,
@@ -783,6 +925,43 @@ export default function AddPlaceModal() {
           ))}
         </View>
 
+        {/* ---- Star Rating ---- */}
+        <Text style={styles.label}>RATING</Text>
+        <View style={styles.starGrid}>
+          {([1, 2, 3] as StarRating[]).map((star) => (
+            <Pressable
+              key={star}
+              style={[
+                styles.starChip,
+                selectedStars === star && styles.starChipActive,
+              ]}
+              onPress={() =>
+                setSelectedStars(selectedStars === star ? null : star)
+              }
+              disabled={isSubmitting}
+            >
+              <View style={styles.starIcons}>
+                {Array.from({ length: star }).map((_, i) => (
+                  <Ionicons
+                    key={i}
+                    name="star"
+                    size={12}
+                    color={selectedStars === star ? colors.gold.primary : colors.text.tertiary}
+                  />
+                ))}
+              </View>
+              <Text
+                style={[
+                  styles.budgetLabel,
+                  selectedStars === star && styles.budgetLabelActive,
+                ]}
+              >
+                {STAR_LABELS[star].toUpperCase()}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
         {/* ---- Description ---- */}
         <Text style={styles.label}>DESCRIPTION</Text>
         <TextInput
@@ -796,6 +975,35 @@ export default function AddPlaceModal() {
           textAlignVertical="top"
           editable={!isSubmitting}
         />
+
+        {/* ---- Must-try (food & drink places only) ---- */}
+        {(selectedCategory === 'restaurant' ||
+          selectedCategory === 'cafe' ||
+          selectedCategory === 'bar' ||
+          selectedCategory === 'club') && (
+          <>
+            <Text style={styles.label}>
+              {selectedCategory === 'bar' || selectedCategory === 'club'
+                ? 'MUST-TRY COCKTAILS / DRINKS'
+                : 'MUST-TRY DISHES'}
+            </Text>
+            <TextInput
+              style={[styles.input, styles.textArea, { minHeight: 70 }]}
+              value={mustTry}
+              onChangeText={setMustTry}
+              placeholder={
+                selectedCategory === 'bar' || selectedCategory === 'club'
+                  ? 'What should people order? e.g. the mezcal negroni, their espresso martini...'
+                  : 'What should people order? e.g. the truffle pasta, khinkali, tres leches...'
+              }
+              placeholderTextColor={colors.text.tertiary}
+              multiline
+              numberOfLines={3}
+              textAlignVertical="top"
+              editable={!isSubmitting}
+            />
+          </>
+        )}
 
         {/* ---- Address ---- */}
         <Text style={styles.label}>
@@ -973,7 +1181,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   addPhotoButton: {
-    width: 100,
+    width: 80,
     height: 100,
     borderRadius: radius.sm,
     borderWidth: 1,
@@ -996,8 +1204,6 @@ const styles = StyleSheet.create({
     marginRight: spacing.sm,
   },
   photoThumb: {
-    width: 100,
-    height: 100,
     borderRadius: radius.sm,
   },
   removePhotoButton: {
@@ -1006,6 +1212,31 @@ const styles = StyleSheet.create({
     right: -6,
     backgroundColor: colors.background.primary,
     borderRadius: 11,
+  },
+  reorderBar: {
+    position: 'absolute',
+    bottom: 4,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 2,
+  },
+  reorderArrow: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  photoIndex: {
+    fontFamily: fonts.sans.semiBold,
+    fontSize: 10,
+    color: colors.text.primary,
+    minWidth: 16,
+    textAlign: 'center',
   },
 
   // Search Images section
@@ -1081,6 +1312,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.ui.border,
   },
+  inputLinked: {
+    borderColor: colors.ui.success + '60',
+  },
   textArea: {
     height: 100,
     paddingTop: spacing.md,
@@ -1115,8 +1349,8 @@ const styles = StyleSheet.create({
     backgroundColor: colors.gold.primary + '15',
     borderColor: colors.gold.primary,
   },
-  categoryEmoji: {
-    fontSize: 13,
+  categoryIcon: {
+    // icon size handled inline
   },
   categoryLabel: {
     fontFamily: fonts.sans.medium,
@@ -1167,6 +1401,30 @@ const styles = StyleSheet.create({
   },
   budgetLabelActive: {
     color: colors.gold.primary,
+  },
+  starGrid: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  starChip: {
+    flex: 1,
+    alignItems: 'center',
+    backgroundColor: colors.background.tertiary,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.md,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.ui.border,
+    gap: 4,
+  },
+  starChipActive: {
+    backgroundColor: colors.gold.primary + '15',
+    borderColor: colors.gold.primary,
+  },
+  starIcons: {
+    flexDirection: 'row',
+    gap: 2,
   },
 
   // Tags

@@ -87,8 +87,8 @@ const TAG_NORMALIZATION: Record<string, string> = {
   'night club': 'nightclub',
   'disco': 'nightclub',
 
-  // Nature variants
-  'outdoor': 'nature',
+  // Nature variants (remapped to culture / Do)
+  'outdoor': 'outdoor',
   'green space': 'park',
   'garden': 'park',
   'gardens': 'park',

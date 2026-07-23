@@ -25,19 +25,22 @@ export const MIN_ZOOM_LEVEL = 2;
 export const MAX_ZOOM_LEVEL = 20;
 
 // ---------------------------------------------------------------------------
-// Custom dark map style — apothecary / botanical theme
-// Warm dark greens, muted earth tones. Works with Google Maps provider on
-// Android; iOS uses userInterfaceStyle="dark" instead.
+// Custom map style — Michelin Guide–inspired light theme
+// Clean, warm beige base with minimal detail. Roads are subtle white,
+// water is soft blue, parks are muted sage. POIs and transit hidden.
 // ---------------------------------------------------------------------------
 
 export const CUSTOM_MAP_STYLE = [
-  { elementType: 'geometry', stylers: [{ color: '#111714' }] },
-  { elementType: 'labels.text.stroke', stylers: [{ color: '#111714' }] },
-  { elementType: 'labels.text.fill', stylers: [{ color: '#5a6357' }] },
+  // Base
+  { elementType: 'geometry', stylers: [{ color: '#E8E0D0' }] },
+  { elementType: 'labels.text.stroke', stylers: [{ color: '#F5F0E8' }] },
+  { elementType: 'labels.text.fill', stylers: [{ color: '#8A8478' }] },
+
+  // Administrative
   {
     featureType: 'administrative',
     elementType: 'geometry.stroke',
-    stylers: [{ color: '#2a332e' }],
+    stylers: [{ color: '#D0C8BC' }],
   },
   {
     featureType: 'administrative.land_parcel',
@@ -46,67 +49,95 @@ export const CUSTOM_MAP_STYLE = [
   },
   {
     featureType: 'administrative.neighborhood',
-    elementType: 'labels',
-    stylers: [{ visibility: 'off' }],
+    elementType: 'labels.text.fill',
+    stylers: [{ visibility: 'on' }, { color: '#9A948A' }],
   },
+  {
+    featureType: 'administrative.locality',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#6B6560' }],
+  },
+
+  // Landscape
   {
     featureType: 'landscape.man_made',
     elementType: 'geometry.fill',
-    stylers: [{ color: '#151c18' }],
+    stylers: [{ color: '#EAE2D4' }],
   },
   {
     featureType: 'landscape.natural',
     elementType: 'geometry',
-    stylers: [{ color: '#131a16' }],
+    stylers: [{ color: '#E5DDD0' }],
   },
+
+  // POI — visible so users can browse real restaurants, hotels, cafes on
+  // the map like Google Maps and tap one to add it as a Syrena place.
+  // The map screen's onPoiClick handler takes care of the tap-to-add flow.
   {
     featureType: 'poi',
     elementType: 'geometry',
-    stylers: [{ color: '#1a231e' }],
+    stylers: [{ color: '#DDD8CE' }],
   },
   {
     featureType: 'poi',
     elementType: 'labels',
-    stylers: [{ visibility: 'off' }],
+    stylers: [{ visibility: 'on' }],
   },
   {
     featureType: 'poi',
     elementType: 'labels.icon',
-    stylers: [{ visibility: 'off' }],
+    stylers: [{ visibility: 'on' }],
   },
   {
-    featureType: 'poi.park',
-    elementType: 'labels',
-    stylers: [{ visibility: 'simplified' }],
+    featureType: 'poi',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#6B6560' }],
   },
   {
     featureType: 'poi.park',
     elementType: 'geometry.fill',
-    stylers: [{ color: '#1a2a1e' }],
+    stylers: [{ color: '#D4DFC8' }],
   },
+  {
+    featureType: 'poi.park',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#8A9A78' }],
+  },
+
+  // Roads
   {
     featureType: 'road',
     elementType: 'geometry',
-    stylers: [{ color: '#222b26' }],
+    stylers: [{ color: '#FFFFFF' }],
   },
   {
     featureType: 'road',
     elementType: 'geometry.stroke',
-    stylers: [{ color: '#2a342e' }],
+    stylers: [{ color: '#E0D8CC' }],
   },
   {
-    featureType: 'road',
-    elementType: 'labels',
-    stylers: [{ visibility: 'off' }],
+    featureType: 'road.local',
+    elementType: 'labels.text.fill',
+    stylers: [{ visibility: 'on' }, { color: '#A09A90' }],
+  },
+  {
+    featureType: 'road.arterial',
+    elementType: 'labels.text.fill',
+    stylers: [{ visibility: 'on' }, { color: '#8A8478' }],
   },
   {
     featureType: 'road.highway',
     elementType: 'geometry',
-    stylers: [{ color: '#1e2824' }],
+    stylers: [{ color: '#F0E8DA' }],
   },
   {
     featureType: 'road.highway',
     elementType: 'geometry.stroke',
+    stylers: [{ color: '#D8D0C4' }],
+  },
+  {
+    featureType: 'road.highway',
+    elementType: 'labels.text.fill',
     stylers: [{ visibility: 'off' }],
   },
   {
@@ -114,18 +145,28 @@ export const CUSTOM_MAP_STYLE = [
     elementType: 'labels.icon',
     stylers: [{ visibility: 'off' }],
   },
+
+  // Transit — hidden
   {
     featureType: 'transit',
+    elementType: 'geometry',
+    stylers: [{ color: '#D8D0C4' }],
+  },
+  {
+    featureType: 'transit.station',
+    elementType: 'labels',
     stylers: [{ visibility: 'off' }],
   },
+
+  // Water
   {
     featureType: 'water',
     elementType: 'geometry',
-    stylers: [{ color: '#0e1412' }],
+    stylers: [{ color: '#AAC4D8' }],
   },
   {
     featureType: 'water',
     elementType: 'labels.text.fill',
-    stylers: [{ color: '#3a4a40' }],
+    stylers: [{ color: '#7A9AB0' }],
   },
 ];

@@ -5,10 +5,10 @@ import {
   StyleSheet,
   Pressable,
   FlatList,
-  Image,
   Alert,
   ActivityIndicator,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,6 +18,7 @@ import { useAuthStore } from '../../src/stores';
 import { UserProfile, EditSuggestion, PlaceEditableFields, DeletionRequest } from '../../src/types';
 import { getDocuments, updateDocument } from '../../src/services/firebase/firestore';
 import { usePlacesStore } from '../../src/stores/usePlacesStore';
+import { avatarUrl } from '../../src/utils/placeholderAvatar';
 
 // Friendly labels for field names
 const FIELD_LABELS: Record<string, string> = {
@@ -36,10 +37,15 @@ export default function AdminApprovalsModal() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const profile = useAuthStore((s) => s.profile);
+  const banUser = useAuthStore((s) => s.banUser);
+  const unbanUser = useAuthStore((s) => s.unbanUser);
   const { approveEditSuggestion, rejectEditSuggestion, approveDeletion, rejectDeletion } = usePlacesStore();
 
   const [activeTab, setActiveTab] = useState<'users' | 'edits' | 'deletions' | 'history'>('users');
+  const [usersSubTab, setUsersSubTab] = useState<'pending' | 'approved' | 'banned'>('pending');
   const [pendingUsers, setPendingUsers] = useState<UserProfile[]>([]);
+  const [approvedUsers, setApprovedUsers] = useState<UserProfile[]>([]);
+  const [bannedUsers, setBannedUsers] = useState<UserProfile[]>([]);
   const [pendingEdits, setPendingEdits] = useState<EditSuggestion[]>([]);
   const [pendingDeletions, setPendingDeletions] = useState<DeletionRequest[]>([]);
   const [historyUsers, setHistoryUsers] = useState<UserProfile[]>([]);
@@ -51,7 +57,13 @@ export default function AdminApprovalsModal() {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.header}>
-          <Pressable onPress={() => router.back()}>
+          <Pressable
+            onPress={() => router.back()}
+            hitSlop={12}
+            style={styles.headerIconButton}
+            accessibilityLabel="Close"
+            accessibilityRole="button"
+          >
             <Ionicons name="close" size={22} color={colors.text.primary} />
           </Pressable>
           <Text style={styles.headerTitle}>Approvals</Text>
@@ -76,6 +88,29 @@ export default function AdminApprovalsModal() {
       console.error('Error fetching pending users:', error);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const fetchApprovedUsers = async () => {
+    try {
+      const users = await getDocuments<UserProfile>('users', [
+        where('status', '==', 'approved'),
+      ]);
+      // Filter out admins so admin can't ban themselves or other admins
+      setApprovedUsers(users.filter((u) => !u.isAdmin));
+    } catch (error) {
+      console.error('Error fetching approved users:', error);
+    }
+  };
+
+  const fetchBannedUsers = async () => {
+    try {
+      const users = await getDocuments<UserProfile>('users', [
+        where('status', '==', 'banned'),
+      ]);
+      setBannedUsers(users);
+    } catch (error) {
+      console.error('Error fetching banned users:', error);
     }
   };
 
@@ -150,6 +185,8 @@ export default function AdminApprovalsModal() {
 
   const handleRefresh = () => {
     fetchPending();
+    fetchApprovedUsers();
+    fetchBannedUsers();
     fetchPendingEdits();
     fetchPendingDeletions();
     if (activeTab === 'history') {
@@ -160,6 +197,8 @@ export default function AdminApprovalsModal() {
 
   useEffect(() => {
     fetchPending();
+    fetchApprovedUsers();
+    fetchBannedUsers();
     fetchPendingEdits();
     fetchPendingDeletions();
   }, []);
@@ -288,7 +327,116 @@ export default function AdminApprovalsModal() {
     router.push(`/modal/user-profile?id=${uid}`);
   };
 
+  // ── Ban / Unban handlers ──
+
+  const handleBanFromList = (uid: string, name: string) => {
+    Alert.alert(
+      'Ban User',
+      `Ban "${name}"? They will be locked out of the app and their data will be cleaned up.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Ban',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await banUser(uid);
+              setApprovedUsers((prev) => prev.filter((u) => (u.uid || (u as any).id) !== uid));
+              // Re-fetch banned list so it shows up there
+              fetchBannedUsers();
+              Alert.alert('Banned', `${name} has been banned.`);
+            } catch (error) {
+              Alert.alert('Error', 'Could not ban user.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
+  const handleUnbanFromList = (uid: string, name: string) => {
+    Alert.alert(
+      'Unban User',
+      `Restore access for "${name}"? They will be able to use the app again.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Unban',
+          onPress: async () => {
+            try {
+              await unbanUser(uid);
+              setBannedUsers((prev) => prev.filter((u) => (u.uid || (u as any).id) !== uid));
+              // Re-fetch approved list so it shows up there
+              fetchApprovedUsers();
+              Alert.alert('Unbanned', `${name} has been restored.`);
+            } catch (error) {
+              Alert.alert('Error', 'Could not unban user.');
+            }
+          },
+        },
+      ],
+    );
+  };
+
   // ── Renderers ──
+
+  const renderApprovedUser = ({ item }: { item: UserProfile }) => (
+    <View style={styles.card}>
+      <View style={[styles.cardBrass, { backgroundColor: colors.ui.success }]} />
+      <View style={styles.cardContent}>
+        <Pressable style={styles.userRow} onPress={() => navigateToProfile(item.uid || (item as any).id)}>
+          <Image
+            source={{ uri: avatarUrl(item.photoURL, item.uid || (item as any).id) }}
+            style={styles.userAvatar}
+          />
+          <View style={styles.userInfo}>
+            <Text style={styles.userName}>{item.displayName}</Text>
+            <Text style={styles.userUsername}>@{item.username}</Text>
+          </View>
+        </Pressable>
+        <View style={styles.actionRow}>
+          <Pressable
+            style={styles.rejectButton}
+            onPress={() => handleBanFromList(item.uid || (item as any).id, item.displayName)}
+          >
+            <Ionicons name="ban" size={14} color="#fff" />
+            <Text style={styles.rejectText}>BAN</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
+
+  const renderBannedUser = ({ item }: { item: UserProfile }) => (
+    <View style={styles.card}>
+      <View style={[styles.cardBrass, { backgroundColor: colors.ui.error }]} />
+      <View style={styles.cardContent}>
+        <Pressable style={styles.userRow} onPress={() => navigateToProfile(item.uid || (item as any).id)}>
+          <Image
+            source={{ uri: avatarUrl(item.photoURL, item.uid || (item as any).id) }}
+            style={styles.userAvatar}
+          />
+          <View style={styles.userInfo}>
+            <Text style={styles.userName}>{item.displayName}</Text>
+            <Text style={styles.userUsername}>@{item.username}</Text>
+          </View>
+          <View style={[styles.statusBadge, styles.statusRejected]}>
+            <Ionicons name="ban" size={10} color={colors.ui.error} />
+            <Text style={[styles.statusBadgeText, { color: colors.ui.error }]}>BANNED</Text>
+          </View>
+        </Pressable>
+        <View style={styles.actionRow}>
+          <Pressable
+            style={styles.approveButton}
+            onPress={() => handleUnbanFromList(item.uid || (item as any).id, item.displayName)}
+          >
+            <Ionicons name="checkmark-circle" size={14} color={colors.background.primary} />
+            <Text style={styles.approveText}>UNBAN</Text>
+          </Pressable>
+        </View>
+      </View>
+    </View>
+  );
 
   const renderUser = ({ item }: { item: UserProfile }) => (
     <View style={styles.card}>
@@ -296,7 +444,7 @@ export default function AdminApprovalsModal() {
       <View style={styles.cardContent}>
         <Pressable style={styles.userRow} onPress={() => navigateToProfile(item.uid || (item as any).id)}>
           <Image
-            source={{ uri: item.photoURL || 'https://i.pravatar.cc/100?img=3' }}
+            source={{ uri: avatarUrl(item.photoURL, item.uid || (item as any).id) }}
             style={styles.userAvatar}
           />
           <View style={styles.userInfo}>
@@ -356,7 +504,7 @@ export default function AdminApprovalsModal() {
           {/* Submitter + Place info */}
           <Pressable style={styles.userRow} onPress={() => navigateToProfile(item.submittedBy)}>
             <Image
-              source={{ uri: item.submittedByPhoto || 'https://i.pravatar.cc/100?img=3' }}
+              source={{ uri: avatarUrl(item.submittedByPhoto, item.submittedBy) }}
               style={styles.userAvatar}
             />
             <View style={styles.userInfo}>
@@ -423,7 +571,7 @@ export default function AdminApprovalsModal() {
       <View style={styles.cardContent}>
         <Pressable style={styles.userRow} onPress={() => navigateToProfile(item.uid || (item as any).id)}>
           <Image
-            source={{ uri: item.photoURL || 'https://i.pravatar.cc/100?img=3' }}
+            source={{ uri: avatarUrl(item.photoURL, item.uid || (item as any).id) }}
             style={styles.userAvatar}
           />
           <View style={styles.userInfo}>
@@ -454,7 +602,7 @@ export default function AdminApprovalsModal() {
         <View style={styles.cardContent}>
           <Pressable style={styles.userRow} onPress={() => navigateToProfile(item.submittedBy)}>
             <Image
-              source={{ uri: item.submittedByPhoto || 'https://i.pravatar.cc/100?img=3' }}
+              source={{ uri: avatarUrl(item.submittedByPhoto, item.submittedBy) }}
               style={styles.userAvatar}
             />
             <View style={styles.userInfo}>
@@ -505,7 +653,7 @@ export default function AdminApprovalsModal() {
       <View style={styles.cardContent}>
         <Pressable style={styles.userRow} onPress={() => navigateToProfile(item.requestedBy)}>
           <Image
-            source={{ uri: item.requestedByPhoto || 'https://i.pravatar.cc/100?img=3' }}
+            source={{ uri: avatarUrl(item.requestedByPhoto, item.requestedBy) }}
             style={styles.userAvatar}
           />
           <View style={styles.userInfo}>
@@ -554,11 +702,23 @@ export default function AdminApprovalsModal() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={styles.headerIconButton}
+          accessibilityLabel="Close"
+          accessibilityRole="button"
+        >
           <Ionicons name="close" size={22} color={colors.text.primary} />
         </Pressable>
         <Text style={styles.headerTitle}>Approvals</Text>
-        <Pressable onPress={handleRefresh}>
+        <Pressable
+          onPress={handleRefresh}
+          hitSlop={12}
+          style={styles.headerIconButton}
+          accessibilityLabel="Refresh"
+          accessibilityRole="button"
+        >
           <Ionicons name="refresh" size={20} color={colors.gold.primary} />
         </Pressable>
       </View>
@@ -619,22 +779,72 @@ export default function AdminApprovalsModal() {
         </Pressable>
       </View>
 
+      {/* Users sub-tabs */}
+      {activeTab === 'users' && (
+        <View style={styles.subTabRow}>
+          {(['pending', 'approved', 'banned'] as const).map((sub) => {
+            const isActive = usersSubTab === sub;
+            const count =
+              sub === 'pending' ? pendingUsers.length :
+              sub === 'approved' ? approvedUsers.length :
+              bannedUsers.length;
+            return (
+              <Pressable
+                key={sub}
+                style={[styles.subTab, isActive && styles.subTabActive]}
+                onPress={() => setUsersSubTab(sub)}
+              >
+                <Text style={[styles.subTabText, isActive && styles.subTabTextActive]}>
+                  {sub.toUpperCase()} ({count})
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      )}
+
       {/* Content */}
       {isLoading ? (
         <View style={styles.centered}>
           <ActivityIndicator size="large" color={colors.gold.primary} />
         </View>
       ) : activeTab === 'users' ? (
-        pendingUsers.length === 0 ? (
-          renderEmpty('No pending user approvals')
+        usersSubTab === 'pending' ? (
+          pendingUsers.length === 0 ? (
+            renderEmpty('No pending user approvals')
+          ) : (
+            <FlatList
+              data={pendingUsers}
+              keyExtractor={(item) => item.uid || (item as any).id}
+              renderItem={renderUser}
+              contentContainerStyle={styles.list}
+              showsVerticalScrollIndicator={false}
+            />
+          )
+        ) : usersSubTab === 'approved' ? (
+          approvedUsers.length === 0 ? (
+            renderEmpty('No approved users')
+          ) : (
+            <FlatList
+              data={approvedUsers}
+              keyExtractor={(item) => item.uid || (item as any).id}
+              renderItem={renderApprovedUser}
+              contentContainerStyle={styles.list}
+              showsVerticalScrollIndicator={false}
+            />
+          )
         ) : (
-          <FlatList
-            data={pendingUsers}
-            keyExtractor={(item) => item.uid || (item as any).id}
-            renderItem={renderUser}
-            contentContainerStyle={styles.list}
-            showsVerticalScrollIndicator={false}
-          />
+          bannedUsers.length === 0 ? (
+            renderEmpty('No banned users')
+          ) : (
+            <FlatList
+              data={bannedUsers}
+              keyExtractor={(item) => item.uid || (item as any).id}
+              renderItem={renderBannedUser}
+              contentContainerStyle={styles.list}
+              showsVerticalScrollIndicator={false}
+            />
+          )
         )
       ) : activeTab === 'edits' ? (
         pendingEdits.length === 0 ? (
@@ -717,6 +927,12 @@ const styles = StyleSheet.create({
     borderBottomWidth: 0.5,
     borderBottomColor: colors.ui.border,
   },
+  headerIconButton: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   headerTitle: {
     fontFamily: fonts.serif.bold,
     fontSize: 18,
@@ -754,6 +970,35 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
   },
   tabTextActive: {
+    color: colors.gold.primary,
+  },
+
+  // Sub-tabs (within Users tab)
+  subTabRow: {
+    flexDirection: 'row',
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.sm,
+    gap: spacing.sm,
+  },
+  subTab: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.xs + 2,
+    borderRadius: radius.sm,
+    borderBottomWidth: 1.5,
+    borderBottomColor: 'transparent',
+  },
+  subTabActive: {
+    borderBottomColor: colors.gold.primary,
+  },
+  subTabText: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 10,
+    color: colors.text.tertiary,
+    letterSpacing: 1.5,
+  },
+  subTabTextActive: {
     color: colors.gold.primary,
   },
 

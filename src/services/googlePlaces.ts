@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { normalizeCity, normalizeCountry, isNeighborhood } from '../utils/resolveCity';
 
 // ---------------------------------------------------------------------------
 // Google Places API (New) — Place search + photo retrieval + POI details
@@ -62,12 +63,12 @@ export async function searchPlace(
       languageCode: 'en',
     };
 
-    // Bias results toward the given location (500 m radius)
+    // Bias results toward the given location (50 km radius)
     if (latitude && longitude) {
       body.locationBias = {
         circle: {
           center: { latitude, longitude },
-          radius: 500.0,
+          radius: 50000.0,
         },
       };
     }
@@ -169,7 +170,7 @@ export async function searchPlaces(
       body.locationBias = {
         circle: {
           center: { latitude, longitude },
-          radius: 5000.0,
+          radius: 50000.0,
         },
       };
     }
@@ -318,7 +319,7 @@ export async function getPlaceDetails(
   placeId: string,
 ): Promise<GooglePlaceDetails | null> {
   try {
-    const res = await fetch(`${BASE_URL}/${placeId}`, {
+    const res = await fetch(`${BASE_URL}/${placeId}?languageCode=en`, {
       method: 'GET',
       headers: {
         'X-Goog-Api-Key': API_KEY,
@@ -350,6 +351,8 @@ export async function getPlaceDetails(
     // Extract city & country from addressComponents
     let city = '';
     let country = '';
+    let adminArea2 = '';
+    let adminArea1 = '';
     if (place.addressComponents) {
       for (const comp of place.addressComponents) {
         const types: string[] = comp.types || [];
@@ -359,15 +362,28 @@ export async function getPlaceDetails(
         if (types.includes('country') && !country) {
           country = comp.longText || comp.shortText || '';
         }
-        // Some places don't have "locality" — fall back to sublocality or administrative_area
-        if (
-          !city &&
-          (types.includes('sublocality') ||
-            types.includes('administrative_area_level_1'))
-        ) {
-          city = comp.longText || comp.shortText || '';
+        if (types.includes('administrative_area_level_2') && !adminArea2) {
+          adminArea2 = comp.longText || comp.shortText || '';
+        }
+        if (types.includes('administrative_area_level_1') && !adminArea1) {
+          adminArea1 = comp.longText || comp.shortText || '';
         }
       }
+      // Fall back to admin area if no locality
+      if (!city) city = adminArea2 || adminArea1;
+
+      // If locality is actually a neighbourhood (e.g. "Stare Miasto"),
+      // prefer the administrative area as the real city.
+      if (city && isNeighborhood(city)) {
+        const adminFallback = adminArea2 || adminArea1;
+        city = normalizeCity(city, adminFallback);
+      } else {
+        // Transliterate & normalize (e.g. Warszawa → Warsaw)
+        city = normalizeCity(city);
+      }
+
+      // Normalize country name (e.g. Polska → Poland)
+      country = normalizeCountry(country);
     }
 
     // Build photo URLs
@@ -413,11 +429,11 @@ const GOOGLE_TYPE_TO_CATEGORY: Record<string, string> = {
   meal_takeaway: 'restaurant',
   food: 'restaurant',
   bakery: 'restaurant',
-  // Hotels
-  hotel: 'hotel',
-  lodging: 'hotel',
-  motel: 'hotel',
-  resort_hotel: 'hotel',
+  // Lodging
+  hotel: 'lodging',
+  lodging: 'lodging',
+  motel: 'lodging',
+  resort_hotel: 'lodging',
   // Bars
   bar: 'bar',
   wine_bar: 'bar',
@@ -438,14 +454,26 @@ const GOOGLE_TYPE_TO_CATEGORY: Record<string, string> = {
   library: 'culture',
   tourist_attraction: 'culture',
   // Shopping
-  shopping_mall: 'shopping',
-  store: 'shopping',
-  clothing_store: 'shopping',
-  jewelry_store: 'shopping',
-  book_store: 'shopping',
-  // Nightlife
-  night_club: 'nightlife',
-  casino: 'nightlife',
+  shopping_mall: 'shop',
+  store: 'shop',
+  clothing_store: 'shop',
+  jewelry_store: 'shop',
+  book_store: 'shop',
+  shoe_store: 'shop',
+  electronics_store: 'shop',
+  furniture_store: 'shop',
+  home_goods_store: 'shop',
+  pet_store: 'shop',
+  supermarket: 'shop',
+  grocery_or_supermarket: 'shop',
+  convenience_store: 'shop',
+  department_store: 'shop',
+  florist: 'shop',
+  hardware_store: 'shop',
+  liquor_store: 'shop',
+  // Clubs
+  night_club: 'club',
+  casino: 'club',
   // Services
   bank: 'services',
   atm: 'services',

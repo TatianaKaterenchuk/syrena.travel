@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { PlaceCategory, BudgetTier, UserPlace } from '../types';
+import { PlaceCategory, BudgetTier, StarRating, UserPlace } from '../types';
 import { getDocuments, where } from '../services/firebase/firestore';
 
 // Region type inlined to avoid importing react-native-maps on web
@@ -12,16 +12,18 @@ interface Region {
 
 const ALL_CATEGORIES: PlaceCategory[] = [
   'restaurant',
-  'hotel',
+  'lodging',
   'bar',
   'cafe',
-  'nature',
+  'club',
   'culture',
-  'shopping',
-  'nightlife',
+  'nature',
+  'shop',
+  'services',
 ];
 
 const ALL_BUDGET_TIERS: BudgetTier[] = [1, 2, 3, 4];
+const ALL_STAR_RATINGS: StarRating[] = [1, 2, 3];
 
 const DEFAULT_REGION: Region = {
   latitude: 52.2297,
@@ -36,6 +38,7 @@ interface MapState {
   region: Region;
   activeFilters: PlaceCategory[];
   activeBudgetFilters: BudgetTier[];
+  activeStarFilters: StarRating[];
   selectedPlaceId: string | null;
   isFilterModalVisible: boolean;
   selectedFriendId: string | null;
@@ -51,6 +54,9 @@ interface MapActions {
   toggleBudgetFilter: (tier: BudgetTier) => void;
   setAllBudgetFilters: () => void;
   clearBudgetFilters: () => void;
+  toggleStarFilter: (star: StarRating) => void;
+  setAllStarFilters: () => void;
+  clearStarFilters: () => void;
   selectPlace: (placeId: string | null) => void;
   toggleFilterModal: () => void;
   setFriendFilter: (friendUid: string, mode?: FriendFilterMode) => Promise<void>;
@@ -62,6 +68,7 @@ export const useMapStore = create<MapState & MapActions>((set, get) => ({
   region: DEFAULT_REGION,
   activeFilters: [...ALL_CATEGORIES],
   activeBudgetFilters: [...ALL_BUDGET_TIERS],
+  activeStarFilters: [...ALL_STAR_RATINGS],
   selectedPlaceId: null,
   isFilterModalVisible: false,
   selectedFriendId: null,
@@ -117,6 +124,24 @@ export const useMapStore = create<MapState & MapActions>((set, get) => ({
 
   clearBudgetFilters: () => {
     set({ activeBudgetFilters: [] });
+  },
+
+  toggleStarFilter: (star) => {
+    const { activeStarFilters } = get();
+    const isActive = activeStarFilters.includes(star);
+    if (isActive) {
+      set({ activeStarFilters: activeStarFilters.filter((s) => s !== star) });
+    } else {
+      set({ activeStarFilters: [...activeStarFilters, star] });
+    }
+  },
+
+  setAllStarFilters: () => {
+    set({ activeStarFilters: [...ALL_STAR_RATINGS] });
+  },
+
+  clearStarFilters: () => {
+    set({ activeStarFilters: [] });
   },
 
   selectPlace: (placeId) => {

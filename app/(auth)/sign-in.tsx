@@ -6,12 +6,13 @@ import {
   TextInput,
   Pressable,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   ActivityIndicator,
   Alert,
   Animated,
-  Image,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -27,6 +28,7 @@ export default function SignInScreen() {
   const [isLoading, setIsLoading] = useState(false);
 
   // Animations
+  const passwordInputRef = useRef<TextInput>(null);
   const floatAnim = useRef(new Animated.Value(0)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const shimmerAnim = useRef(new Animated.Value(0)).current;
@@ -85,7 +87,12 @@ export default function SignInScreen() {
     if (!email || !password) return;
     setIsLoading(true);
     try {
-      await signIn(email, password);
+      // Normalize the email: trim whitespace and lowercase the local part / domain.
+      // iPad's on-screen keyboard often slips in a leading capital or trailing space,
+      // and our App Review demo account has a period in the local part which auto-
+      // correct sometimes mangles into a different domain.
+      const normalizedEmail = email.trim().toLowerCase();
+      await signIn(normalizedEmail, password);
       router.replace('/');
     } catch (error: any) {
       const message =
@@ -102,19 +109,54 @@ export default function SignInScreen() {
     }
   };
 
+  const handleForgotPassword = async () => {
+    if (!email || !email.trim()) {
+      Alert.alert(
+        'Email Required',
+        'Enter your email address above first, then tap Forgot Password again.',
+      );
+      return;
+    }
+    // Firebase stores emails case-insensitively but our sign-in normalizes
+    // to lowercase, so the reset lookup must match.
+    const normalizedEmail = email.trim().toLowerCase();
+    try {
+      const { resetPassword } = await import('../../src/services/firebase/auth');
+      await resetPassword(normalizedEmail);
+      Alert.alert(
+        'Reset Email Sent',
+        `If an account exists for ${normalizedEmail}, a password reset link has been sent. Check your inbox.`,
+      );
+    } catch (error: any) {
+      // Log so we can debug in TestFlight if reset silently fails.
+      console.warn('[sign-in] resetPassword error', error?.code, error?.message);
+      // Don't leak whether the email exists; show a generic confirmation
+      Alert.alert(
+        'Reset Email Sent',
+        `If an account exists for ${normalizedEmail}, a password reset link has been sent.`,
+      );
+    }
+  };
+
   return (
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={[styles.content, { paddingTop: insets.top + 40 }]}>
+      {/* Tap anywhere outside the inputs to dismiss the keyboard */}
+      <Pressable
+        style={StyleSheet.absoluteFill}
+        onPress={Keyboard.dismiss}
+        accessible={false}
+      />
+      <View style={[styles.content, { paddingTop: insets.top + 40 }]} pointerEvents="box-none">
         {/* Logo with animated mermaid */}
         <Animated.View style={[styles.logoContainer, { opacity: fadeAnim }]}>
           <Animated.View style={[styles.logoIcon, { transform: [{ translateY: floatTranslate }] }]}>
             <Image
               source={require('../../assets/images/mermaid.png')}
               style={styles.mermaidImage}
-              resizeMode="contain"
+              contentFit="contain"
             />
           </Animated.View>
 
@@ -124,7 +166,7 @@ export default function SignInScreen() {
             <Text style={styles.diamond}>✦</Text>
             <Animated.View style={[styles.dividerLine, { opacity: shimmerAnim }]} />
           </View>
-          <Text style={styles.subtitle}>TRAVEL</Text>
+          <Text style={styles.subtitle}>VOYAGER</Text>
           <Text style={styles.tagline}>Discover extraordinary places</Text>
         </Animated.View>
 
@@ -147,7 +189,14 @@ export default function SignInScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               autoCorrect={false}
+              spellCheck={false}
+              textContentType="username"
+              autoComplete="email"
+              importantForAutofill="yes"
               editable={!isLoading}
+              returnKeyType="next"
+              onSubmitEditing={() => passwordInputRef.current?.focus()}
+              blurOnSubmit={false}
             />
           </View>
 
@@ -158,31 +207,51 @@ export default function SignInScreen() {
               color={colors.text.tertiary}
             />
             <TextInput
+              ref={passwordInputRef}
               style={styles.input}
               value={password}
               onChangeText={setPassword}
               placeholder="Password"
               placeholderTextColor={colors.text.tertiary}
               secureTextEntry={!showPassword}
+              autoCapitalize="none"
+              autoCorrect={false}
+              spellCheck={false}
+              textContentType="password"
+              autoComplete="current-password"
+              importantForAutofill="yes"
               editable={!isLoading}
+              returnKeyType="go"
+              onSubmitEditing={handleSignIn}
             />
-            <Pressable onPress={() => setShowPassword(!showPassword)}>
+            <Pressable
+              onPress={() => setShowPassword(!showPassword)}
+              hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+              accessibilityLabel={showPassword ? 'Hide password' : 'Show password'}
+              accessibilityRole="button"
+            >
               <Ionicons
                 name={showPassword ? 'eye-off-outline' : 'eye-outline'}
-                size={16}
+                size={20}
                 color={colors.text.tertiary}
               />
             </Pressable>
           </View>
 
-          <Pressable style={styles.forgotButton}>
+          <Pressable
+            style={styles.forgotButton}
+            onPress={handleForgotPassword}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityLabel="Forgot password"
+            accessibilityRole="button"
+          >
             <Text style={styles.forgotText}>Forgot Password?</Text>
           </Pressable>
 
           <Pressable
             style={[styles.signInButton, (!email || !password) && styles.signInButtonDisabled]}
             onPress={handleSignIn}
-            disabled={isLoading}
+            disabled={isLoading || !email || !password}
           >
             {isLoading ? (
               <ActivityIndicator color={colors.background.primary} />
@@ -196,7 +265,7 @@ export default function SignInScreen() {
         {/* Sign Up Link */}
         <View style={styles.signUpContainer}>
           <Text style={styles.signUpPrompt}>Don't have an account?</Text>
-          <Pressable onPress={() => router.push('/(auth)/sign-up')}>
+          <Pressable onPress={() => router.push('/(auth)/welcome')}>
             <Text style={styles.signUpLink}>Sign Up</Text>
           </Pressable>
         </View>

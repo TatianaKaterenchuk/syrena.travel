@@ -1,14 +1,17 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
-  Image,
   Pressable,
   Dimensions,
   ActivityIndicator,
+  RefreshControl,
+  Alert,
+  Share,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -17,8 +20,12 @@ import * as Haptics from 'expo-haptics';
 import { colors, fonts, spacing, radius, shadows } from '../../src/theme';
 import { PlaceCategory, UserPlace, BudgetTier, BUDGET_ICONS } from '../../src/types';
 import { usePlacesStore, useAuthStore } from '../../src/stores';
-import { useFriendsStore } from '../../src/stores/useFriendsStore';
 import SearchBar from '../../src/components/ui/SearchBar';
+import { placeImageUri, sizedImageUri } from '../../src/utils/placeholderAvatar';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import DiscoveryTip from '../../src/components/onboarding/DiscoveryTip';
+import { SHARED_CITY_KEY } from '../../src/components/onboarding/ActivationChecklist';
+import OptionSheet from '../../src/components/ui/OptionSheet';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const GRID_GAP = spacing.md;
@@ -26,134 +33,59 @@ const CARD_SIZE = (SCREEN_WIDTH - spacing.lg * 2 - GRID_GAP) / 2;
 
 const categoryColors: Record<PlaceCategory, string> = {
   restaurant: colors.category.restaurant,
-  hotel: colors.category.hotel,
+  lodging: colors.category.lodging,
   bar: colors.category.bar,
   cafe: colors.category.cafe,
-  nature: colors.category.nature,
+  club: colors.category.club,
   culture: colors.category.culture,
-  shopping: colors.category.shopping,
-  nightlife: colors.category.nightlife,
+  nature: colors.category.nature,
+  shop: colors.category.shop,
   services: colors.category.services,
 };
 
-type FilterType =
-  | 'all'
-  | 'favorites'
-  | 'gold_star'
-  | 'friends'
-  | 'recommender'
-  | 'budget_1'
-  | 'budget_2'
-  | 'budget_3'
-  | 'budget_4'
-  | PlaceCategory;
-
-interface FilterItem {
-  key: FilterType;
-  label: string;
-  icon?: keyof typeof Ionicons.glyphMap;
-}
-
-const filters: FilterItem[] = [
-  { key: 'all', label: 'All' },
-  { key: 'favorites', label: 'Favorites', icon: 'star' },
-  { key: 'gold_star', label: 'Best Ever', icon: 'trophy' },
-  { key: 'friends', label: 'Friends', icon: 'people' },
-  { key: 'recommender', label: 'By Person', icon: 'person' },
-  { key: 'budget_1', label: '$' },
-  { key: 'budget_2', label: '$$' },
-  { key: 'budget_3', label: '$$$' },
-  { key: 'budget_4', label: '$$$$' },
-  { key: 'restaurant', label: 'Eat' },
-  { key: 'hotel', label: 'Stay' },
-  { key: 'bar', label: 'Bars' },
-  { key: 'culture', label: 'Do' },
-  { key: 'nature', label: 'Nature' },
-  { key: 'shopping', label: 'Shopping' },
-  { key: 'services', label: 'Services' },
-];
 
 export default function MyPlacesScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const [activeFilter, setActiveFilter] = useState<FilterType>('all');
   const [searchQuery, setSearchQuery] = useState('');
 
-  const { user } = useAuthStore();
+  const { user, profile } = useAuthStore();
   const {
     places,
     userPlaces,
-    friendsPlaces,
     isLoading,
     fetchUserPlaces,
-    fetchFriendsPlaces,
     fetchPlaces,
     toggleFavorite,
-    toggleGoldStar,
   } = usePlacesStore();
-  const { fetchFriends } = useFriendsStore();
 
   // Re-fetch every time the screen comes into focus
   useFocusEffect(
     useCallback(() => {
       fetchUserPlaces();
       fetchPlaces();
-      if (user?.uid) {
-        fetchFriends(user.uid).then(() => {
-          const uids = useFriendsStore.getState().friends.map((f) => f.uid);
-          if (uids.length > 0) fetchFriendsPlaces(uids);
-        });
-      }
     }, [user?.uid])
   );
 
-  // Build a map of recommenders from places data
-  const recommenders = useMemo(() => {
-    const map = new Map<string, { name: string; photo: string; count: number }>();
-    for (const up of userPlaces) {
-      const place = places.find((p) => p.id === up.placeId);
-      const creatorId = up.placeCreatedBy || place?.createdBy;
-      const creatorName = up.placeCreatedByName || place?.createdByName || 'Unknown';
-      const creatorPhoto = place?.createdByPhoto || '';
-      if (creatorId) {
-        const existing = map.get(creatorId);
-        if (existing) {
-          existing.count += 1;
-        } else {
-          map.set(creatorId, { name: creatorName, photo: creatorPhoto, count: 1 });
-        }
-      }
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      // force=true bypasses the fetch TTL — an explicit pull means "check now"
+      await Promise.all([fetchUserPlaces(true), fetchPlaces(true)]);
+    } finally {
+      setIsRefreshing(false);
     }
-    return map;
-  }, [userPlaces, places]);
+  }, [fetchUserPlaces, fetchPlaces]);
 
-  const [selectedRecommender, setSelectedRecommender] = useState<string | null>(null);
+  // Build a set of valid place IDs so we can filter out orphaned UserPlaces
+  const validPlaceIds = useMemo(() => new Set(places.map((p) => p.id)), [places]);
 
+  // Show only favorites
   const filteredPlaces = useMemo(() => {
-    // Step 1: Apply filter
-    let result: UserPlace[];
-    if (activeFilter === 'all') result = userPlaces;
-    else if (activeFilter === 'favorites') result = userPlaces.filter((p) => p.isFavorite);
-    else if (activeFilter === 'gold_star') result = userPlaces.filter((p) => p.isGoldStar);
-    else if (activeFilter === 'friends') result = friendsPlaces;
-    else if (activeFilter === 'recommender') {
-      if (!selectedRecommender) result = userPlaces;
-      else result = userPlaces.filter((up) => {
-        const place = places.find((p) => p.id === up.placeId);
-        return (up.placeCreatedBy || place?.createdBy) === selectedRecommender;
-      });
-    } else if (activeFilter.startsWith('budget_')) {
-      const tier = parseInt(activeFilter.split('_')[1], 10) as BudgetTier;
-      result = userPlaces.filter((up) => {
-        if (up.placeBudgetTier === tier) return true;
-        const place = places.find((p) => p.id === up.placeId);
-        return place?.budgetTier === tier;
-      });
-    } else {
-      result = userPlaces.filter((p) => p.placeCategory === activeFilter);
-    }
+    let result = userPlaces.filter((p) => p.isFavorite);
 
-    // Step 2: Apply search query
+    // Apply search query
     if (searchQuery.trim()) {
       const q = searchQuery.trim().toLowerCase().replace(/^#/, '');
       result = result.filter((up) => {
@@ -161,33 +93,77 @@ export default function MyPlacesScreen() {
         if (up.placeCity?.toLowerCase().includes(q)) return true;
         if (up.placeCountry?.toLowerCase().includes(q)) return true;
         if (up.placeCategory.toLowerCase().includes(q)) return true;
-        // Search tags from full Place object
         const place = places.find((p) => p.id === up.placeId);
         if (place?.tags?.some((tag) => tag.toLowerCase().includes(q))) return true;
         return false;
       });
     }
 
+    // Filter out orphaned UserPlaces whose Place was deleted
+    result = result.filter((up) => validPlaceIds.has(up.placeId));
+
     return result;
-  }, [activeFilter, userPlaces, friendsPlaces, places, selectedRecommender, searchQuery]);
+  }, [userPlaces, places, searchQuery, validPlaceIds]);
+
+  // "I'm coming to Bangkok — what do you recommend?" → share a browser
+  // link to your picks for that city. No app or account needed to view.
+  const [showCitySheet, setShowCitySheet] = useState(false);
+  const myCities = useMemo(
+    () =>
+      user
+        ? [
+            ...new Set(
+              places
+                .filter((p) => p.createdBy === user.uid && p.city)
+                .map((p) => p.city.trim()),
+            ),
+          ].sort()
+        : [],
+    [places, user],
+  );
+
+  const handleShareCity = () => {
+    if (!user) return;
+    if (myCities.length === 0) {
+      Alert.alert(
+        'Nothing to Share Yet',
+        'Add a place recommendation first, then you can share your picks for that city with friends.',
+      );
+      return;
+    }
+    setShowCitySheet(true);
+  };
+
+  const shareCity = async (city: string) => {
+    if (!user) return;
+    setShowCitySheet(false);
+    const firstName = (profile?.displayName || '').split(' ')[0];
+    const url =
+      `https://syrena-travel.web.app/city?u=${user.uid}` +
+      `&city=${encodeURIComponent(city)}` +
+      (firstName ? `&n=${encodeURIComponent(firstName)}` : '');
+    try {
+      await Share.share({
+        message: `My ${city} picks — restaurants, bars and more I actually vouch for:\n${url}`,
+      });
+      // Check off the "share a city" activation item
+      AsyncStorage.setItem(SHARED_CITY_KEY, 'true').catch(() => {});
+    } catch {
+      // user dismissed the share sheet
+    }
+  };
 
   const handleToggleFavorite = (item: UserPlace) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     toggleFavorite(item.id);
   };
 
-  const handleToggleGoldStar = (item: UserPlace) => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
-    toggleGoldStar(item.id);
-  };
-
   const renderCard = ({ item }: { item: UserPlace }) => {
-    const isFriendsFilter = activeFilter === 'friends';
     const place = places.find((p) => p.id === item.placeId);
 
     return (
       <Pressable
-        style={styles.gridCard}
+        style={({ pressed }) => [styles.gridCard, pressed && { opacity: 0.85, transform: [{ scale: 0.98 }] }]}
         onPress={() =>
           router.push({
             pathname: '/modal/place-detail',
@@ -197,11 +173,14 @@ export default function MyPlacesScreen() {
       >
         <Image
           source={{
-            uri:
-              item.placeImageURL ||
-              `https://picsum.photos/400/400?random=${item.id}`,
+            uri: sizedImageUri(
+              item.placeImageURL || placeImageUri(undefined, item.id),
+              400,
+            ),
           }}
           style={styles.gridImage}
+          recyclingKey={item.id}
+          transition={100}
         />
         {/* Category pill — top left */}
         <View style={styles.gridOverlay}>
@@ -218,40 +197,20 @@ export default function MyPlacesScreen() {
           </View>
         </View>
 
-        {/* Gold star badge — top center (if extraordinary) */}
-        {item.isGoldStar && (
-          <View style={styles.goldStarBadge}>
-            <Ionicons name="trophy" size={12} color="#FFD700" />
-          </View>
-        )}
-
-        {/* Action buttons — top right (only on user's own places) */}
-        {!isFriendsFilter && (
-          <View style={styles.cardActions}>
-            <Pressable
-              style={styles.actionButton}
-              onPress={() => handleToggleGoldStar(item)}
-              hitSlop={6}
-            >
-              <Ionicons
-                name={item.isGoldStar ? 'trophy' : 'trophy-outline'}
-                size={14}
-                color={item.isGoldStar ? '#FFD700' : colors.text.tertiary}
-              />
-            </Pressable>
+        {/* Action buttons — top right */}
+        <View style={styles.cardActions}>
             <Pressable
               style={styles.actionButton}
               onPress={() => handleToggleFavorite(item)}
               hitSlop={6}
             >
               <Ionicons
-                name={item.isFavorite ? 'star' : 'star-outline'}
+                name={item.isFavorite ? 'heart' : 'heart-outline'}
                 size={14}
                 color={item.isFavorite ? colors.gold.primary : colors.text.tertiary}
               />
             </Pressable>
           </View>
-        )}
 
         {/* Budget tier badge */}
         {(item.placeBudgetTier || place?.budgetTier) && (
@@ -282,17 +241,49 @@ export default function MyPlacesScreen() {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
+      <DiscoveryTip
+        id="share-city"
+        icon="share-social"
+        title="Share your picks"
+        text="Tap the share icon up top to send friends a link to your recommendations for any city — no app needed on their end."
+      />
+      <OptionSheet
+        visible={showCitySheet}
+        title="Share a City"
+        subtitle="Friends get a link that opens in any browser — no app needed."
+        options={myCities.map((city) => ({
+          key: city,
+          label: city,
+          icon: 'location' as const,
+        }))}
+        onSelect={shareCity}
+        onClose={() => setShowCitySheet(false)}
+      />
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Places</Text>
-        <Pressable
-          style={styles.addButton}
-          onPress={() => router.push('/modal/add-place')}
-        >
-          <View style={styles.addButtonInner}>
-            <Ionicons name="add" size={20} color={colors.background.primary} />
-          </View>
-        </Pressable>
+        <View>
+          <Text style={styles.headerTitle}>My Favorites</Text>
+          <Text style={styles.headerSubtitle}>The places you vouch for</Text>
+        </View>
+        <View style={styles.headerActions}>
+          <Pressable
+            style={styles.shareCityButton}
+            onPress={handleShareCity}
+            hitSlop={8}
+            accessibilityLabel="Share a city with a friend"
+            accessibilityRole="button"
+          >
+            <Ionicons name="share-outline" size={20} color={colors.gold.primary} />
+          </Pressable>
+          <Pressable
+            style={styles.addButton}
+            onPress={() => router.push('/modal/add-place')}
+          >
+            <View style={styles.addButtonInner}>
+              <Ionicons name="add" size={20} color={colors.background.primary} />
+            </View>
+          </Pressable>
+        </View>
       </View>
 
       {/* Search Bar */}
@@ -309,89 +300,6 @@ export default function MyPlacesScreen() {
         )}
       </View>
 
-      {/* Filter Bar */}
-      <FlatList
-        data={filters}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.filterBar}
-        keyExtractor={(item) => item.key}
-        renderItem={({ item }) => (
-          <Pressable
-            style={[
-              styles.filterChip,
-              activeFilter === item.key && styles.filterChipActive,
-            ]}
-            onPress={() => {
-              setActiveFilter(item.key);
-              if (item.key !== 'recommender') setSelectedRecommender(null);
-            }}
-          >
-            {item.icon && (
-              <Ionicons
-                name={item.icon}
-                size={12}
-                color={
-                  activeFilter === item.key
-                    ? colors.text.inverse
-                    : colors.text.secondary
-                }
-              />
-            )}
-            <Text
-              style={[
-                styles.filterChipText,
-                activeFilter === item.key && styles.filterChipTextActive,
-              ]}
-            >
-              {item.label}
-            </Text>
-          </Pressable>
-        )}
-      />
-
-      {/* Recommender sub-filter */}
-      {activeFilter === 'recommender' && recommenders.size > 0 && (
-        <FlatList
-          data={Array.from(recommenders.entries())}
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.recommenderBar}
-          keyExtractor={([id]) => id}
-          renderItem={({ item: [id, info] }) => (
-            <Pressable
-              style={[
-                styles.recommenderChip,
-                selectedRecommender === id && styles.recommenderChipActive,
-              ]}
-              onPress={() =>
-                setSelectedRecommender(selectedRecommender === id ? null : id)
-              }
-            >
-              {info.photo ? (
-                <Image source={{ uri: info.photo }} style={styles.recommenderAvatar} />
-              ) : (
-                <View style={styles.recommenderAvatarPlaceholder}>
-                  <Ionicons name="person" size={10} color={colors.text.tertiary} />
-                </View>
-              )}
-              <Text
-                style={[
-                  styles.recommenderName,
-                  selectedRecommender === id && styles.recommenderNameActive,
-                ]}
-                numberOfLines={1}
-              >
-                {info.name}
-              </Text>
-              <View style={styles.recommenderCount}>
-                <Text style={styles.recommenderCountText}>{info.count}</Text>
-              </View>
-            </Pressable>
-          )}
-        />
-      )}
-
       {isLoading && userPlaces.length === 0 ? (
         <ActivityIndicator
           size="large"
@@ -407,64 +315,33 @@ export default function MyPlacesScreen() {
           columnWrapperStyle={styles.gridRow}
           keyExtractor={(item) => item.id}
           renderItem={renderCard}
+          initialNumToRender={8}
+          maxToRenderPerBatch={8}
+          windowSize={7}
+          removeClippedSubviews
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.gold.primary}
+            />
+          }
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <View style={styles.emptyIconCircle}>
-                <Ionicons
-                  name={
-                    activeFilter === 'favorites'
-                      ? 'star-outline'
-                      : activeFilter === 'gold_star'
-                      ? 'trophy-outline'
-                      : activeFilter === 'friends'
-                      ? 'people-outline'
-                      : activeFilter === 'recommender'
-                      ? 'person-outline'
-                      : activeFilter.startsWith('budget_')
-                      ? 'wallet-outline'
-                      : 'heart-outline'
-                  }
-                  size={32}
-                  color={colors.gold.muted}
-                />
+                <Ionicons name="heart-outline" size={32} color={colors.gold.muted} />
               </View>
-              <Text style={styles.emptyTitle}>
-                {activeFilter === 'favorites'
-                  ? 'No favorites yet'
-                  : activeFilter === 'gold_star'
-                  ? 'No gold star places'
-                  : activeFilter === 'friends'
-                  ? "No friends' places"
-                  : activeFilter === 'recommender'
-                  ? 'No places from this person'
-                  : activeFilter.startsWith('budget_')
-                  ? 'No places at this price range'
-                  : 'No places yet'}
-              </Text>
+              <Text style={styles.emptyTitle}>No favorites yet</Text>
               <Text style={styles.emptySubtitle}>
-                {activeFilter === 'favorites'
-                  ? 'Tap the star on a place to add it to favorites'
-                  : activeFilter === 'gold_star'
-                  ? 'Use the trophy icon to mark extraordinary places'
-                  : activeFilter === 'friends'
-                  ? 'Places your friends save will appear here'
-                  : activeFilter.startsWith('budget_')
-                  ? 'Set a price range when adding places'
-                  : 'Start adding your favorite destinations'}
+                Tap the heart on a place to add it to your favorites
               </Text>
-              {activeFilter === 'all' && (
-                <Pressable
-                  style={styles.emptyButton}
-                  onPress={() => router.push('/modal/add-place')}
-                >
-                  <Ionicons
-                    name="add"
-                    size={18}
-                    color={colors.background.primary}
-                  />
-                  <Text style={styles.emptyButtonText}>Add a Place</Text>
-                </Pressable>
-              )}
+              <Pressable
+                style={styles.emptyButton}
+                onPress={() => router.push('/modal/add-place')}
+              >
+                <Ionicons name="add" size={18} color={colors.background.primary} />
+                <Text style={styles.emptyButtonText}>Add a Place</Text>
+              </Pressable>
             </View>
           }
         />
@@ -490,6 +367,26 @@ const styles = StyleSheet.create({
     fontSize: 32,
     color: colors.text.primary,
     letterSpacing: 0.3,
+  },
+  headerSubtitle: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 13,
+    color: colors.text.secondary,
+    marginTop: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  shareCityButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1.5,
+    borderColor: colors.gold.primary,
   },
   addButton: {
     width: 38,
@@ -525,16 +422,18 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.lg,
     paddingBottom: spacing.md,
     gap: spacing.sm,
+    height: 34 + spacing.md,
   },
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     paddingHorizontal: spacing.lg,
-    paddingVertical: 8,
+    height: 34,
     borderRadius: radius.full,
-    backgroundColor: 'transparent',
-    borderWidth: 0.5,
-    borderColor: colors.gold.muted,
+    backgroundColor: colors.background.secondary,
+    borderWidth: 1,
+    borderColor: colors.gold.muted + '60',
     gap: 5,
   },
   filterChipActive: {
@@ -542,9 +441,9 @@ const styles = StyleSheet.create({
     borderColor: colors.gold.primary,
   },
   filterChipText: {
-    fontFamily: fonts.sans.medium,
+    fontFamily: fonts.sans.semiBold,
     fontSize: 11,
-    color: colors.text.secondary,
+    color: colors.gold.light,
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
@@ -648,20 +547,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     letterSpacing: 0.6,
     textTransform: 'uppercase',
-  },
-  goldStarBadge: {
-    position: 'absolute',
-    top: spacing.sm,
-    alignSelf: 'center',
-    left: CARD_SIZE / 2 - 12,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: 'rgba(11, 15, 14, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#FFD700',
   },
   cardActions: {
     position: 'absolute',

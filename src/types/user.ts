@@ -1,6 +1,6 @@
 import { Timestamp } from 'firebase/firestore';
 
-export type AccountStatus = 'pending' | 'approved' | 'rejected';
+export type AccountStatus = 'pending' | 'approved' | 'rejected' | 'banned';
 
 export interface UserProfile {
   uid: string;

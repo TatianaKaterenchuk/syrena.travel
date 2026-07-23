@@ -17,7 +17,7 @@ const SEED_FEED_ITEMS: FeedItem[] = [
     actorName: 'Syrena Team',
     actorPhoto: '',
     placeId: 'welcome',
-    placeName: 'Welcome to Syrena Travel!',
+    placeName: 'Welcome to Syrena Voyager!',
     placeImageURL: '',
     createdAt: Timestamp.fromMillis(Date.now()),
     visibility: ['public'],

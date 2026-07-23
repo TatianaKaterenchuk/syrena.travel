@@ -22,6 +22,8 @@ export const useAdminNotificationStore = create<
   totalPendingCount: 0,
 
   subscribe: () => {
+    const onErr = (error: Error) => console.error('[adminNotifications] listener error:', error);
+
     const unsubUsers = subscribeToDocuments<UserProfile>(
       'users',
       [where('status', '==', 'pending')],
@@ -31,6 +33,7 @@ export const useAdminNotificationStore = create<
           totalPendingCount: docs.length + state.pendingEditsCount,
         }));
       },
+      onErr,
     );
 
     const unsubEdits = subscribeToDocuments(
@@ -42,6 +45,7 @@ export const useAdminNotificationStore = create<
           totalPendingCount: state.pendingUsersCount + docs.length,
         }));
       },
+      onErr,
     );
 
     return () => {

@@ -1,28 +1,27 @@
 {
   "expo": {
-    "name": "Syrena Travel",
+    "name": "Syrena Voyager",
     "slug": "syrena-travel",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "scheme": "syrena-travel",
     "splash": {
-      "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
-      "backgroundColor": "#0B0F0E"
+      "backgroundColor": "#010954"
     },
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.alegro.syrena-travel",
       "googleServicesFile": "./GoogleService-Info.plist",
       "config": {
         "googleMapsApiKey": "AIzaSyBnYqu6JhN1NQVNkDXN_zhpmNoWy4lFAzo"
       },
       "infoPlist": {
-        "NSLocationWhenInUseUsageDescription": "Syrena Travel uses your location to show nearby places on the map and help you discover destinations around you.",
-        "NSPhotoLibraryUsageDescription": "Syrena Travel needs access to your photos to set your profile picture and add photos to places.",
+        "NSLocationWhenInUseUsageDescription": "Your current location is used to display your position on the Map tab and to sort recommended restaurants, bars, and hotels by distance when you tap Near Me on the Explore tab.",
+        "NSPhotoLibraryUsageDescription": "Your photo library is accessed when you tap Choose Photo to set a profile picture or when you tap Add Photo while submitting a place recommendation.",
         "ITSAppUsesNonExemptEncryption": false,
         "UIBackgroundModes": ["remote-notification"]
       }
@@ -30,7 +29,7 @@
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0B0F0E"
+        "backgroundColor": "#010954"
       },
       "edgeToEdgeEnabled": true,
       "package": "com.syrena.travel",
@@ -57,13 +56,14 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "Syrena Travel uses your location to show nearby places on the map."
+          "locationWhenInUsePermission": "Your current location is used to display your position on the Map tab and to sort recommended places by distance when you tap Near Me on the Explore tab."
         }
       ],
       [
         "expo-image-picker",
         {
-          "photosPermission": "Syrena Travel needs access to your photos to set your profile picture and add photos to places."
+          "photosPermission": "Your photo library is accessed when you tap Choose Photo to set a profile picture or when you tap Add Photo while submitting a place recommendation.",
+          "cameraPermission": "The camera is used when you tap Take Photo to capture a new profile picture or to photograph a place you are recommending."
         }
       ],
       "expo-web-browser",

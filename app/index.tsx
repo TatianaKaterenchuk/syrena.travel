@@ -1,16 +1,12 @@
-import { useEffect } from 'react';
 import { Redirect } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useAuthStore } from '../src/stores';
 import { colors } from '../src/theme';
 
 export default function Index() {
-  const { isAuthenticated, isApproved, isLoading, initialize } = useAuthStore();
-
-  useEffect(() => {
-    const unsubscribe = initialize();
-    return unsubscribe;
-  }, []);
+  // Auth subscription is initialized once in `app/_layout.tsx` so it survives
+  // route changes — this screen only needs to read the current state.
+  const { isAuthenticated, isApproved, isLoading } = useAuthStore();
 
   if (isLoading) {
     return (

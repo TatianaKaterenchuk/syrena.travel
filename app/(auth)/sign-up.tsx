@@ -10,6 +10,7 @@ import {
   ScrollView,
   ActivityIndicator,
   Alert,
+  Linking,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -37,7 +38,19 @@ export default function SignUpScreen() {
     if (!isFormValid) return;
     setIsLoading(true);
     try {
-      await signUp(email, password, displayName, username, about.trim(), referralSource.trim());
+      // Usernames must be unique — otherwise @handles are ambiguous in
+      // search, friends lists, and mentions.
+      const cleanUsername = username.trim().toLowerCase().replace(/^@/, '');
+      const { getDocuments, where } = await import('../../src/services/firebase/firestore');
+      const taken = await getDocuments<any>('users', [
+        where('username', '==', cleanUsername),
+      ]).catch(() => []);
+      if (taken.length > 0) {
+        Alert.alert('Username Taken', `@${cleanUsername} is already in use. Try another.`);
+        setIsLoading(false);
+        return;
+      }
+      await signUp(email, password, displayName, cleanUsername, about.trim(), referralSource.trim());
       router.replace('/');
     } catch (error: any) {
       const message =
@@ -89,7 +102,7 @@ export default function SignUpScreen() {
           </View>
 
           <Text style={styles.subtitle}>
-            Join Syrena and discover extraordinary destinations
+            Join Syrena Voyager and discover extraordinary destinations
           </Text>
         </View>
 
@@ -233,8 +246,19 @@ export default function SignUpScreen() {
         {/* Terms */}
         <Text style={styles.terms}>
           By creating an account, you agree to our{' '}
-          <Text style={styles.termsLink}>Terms of Service</Text> and{' '}
-          <Text style={styles.termsLink}>Privacy Policy</Text>
+          <Text
+            style={styles.termsLink}
+            onPress={() => Linking.openURL('https://syrena-travel.web.app/')}
+          >
+            Terms of Service
+          </Text>{' '}
+          and{' '}
+          <Text
+            style={styles.termsLink}
+            onPress={() => Linking.openURL('https://syrena-travel.web.app/')}
+          >
+            Privacy Policy
+          </Text>
         </Text>
 
         {/* Sign In Link */}

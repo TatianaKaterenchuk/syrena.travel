@@ -6,12 +6,12 @@ import {
   TextInput,
   Pressable,
   ScrollView,
-  Image,
   Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -20,6 +20,7 @@ import { colors, fonts, spacing, radius } from '../../src/theme';
 import { usePlacesStore, useAuthStore } from '../../src/stores';
 import { UserProfile } from '../../src/types';
 import { getDocuments } from '../../src/services/firebase/firestore';
+import { avatarUrl } from '../../src/utils/placeholderAvatar';
 
 export default function FeaturedPersonModal() {
   const router = useRouter();
@@ -119,11 +120,24 @@ export default function FeaturedPersonModal() {
     >
       {/* Header */}
       <View style={styles.header}>
-        <Pressable onPress={() => router.back()}>
+        <Pressable
+          onPress={() => router.back()}
+          hitSlop={12}
+          style={styles.headerIconButton}
+          accessibilityLabel="Close"
+          accessibilityRole="button"
+        >
           <Ionicons name="close" size={22} color={colors.text.primary} />
         </Pressable>
         <Text style={styles.headerTitle}>Featured Person</Text>
-        <Pressable onPress={handleSubmit} disabled={isSubmitting}>
+        <Pressable
+          onPress={handleSubmit}
+          disabled={isSubmitting}
+          hitSlop={12}
+          style={styles.headerIconButton}
+          accessibilityLabel="Save"
+          accessibilityRole="button"
+        >
           {isSubmitting ? (
             <ActivityIndicator size="small" color={colors.gold.primary} />
           ) : (
@@ -141,14 +155,19 @@ export default function FeaturedPersonModal() {
         {selectedUser && (
           <View style={styles.selectedCard}>
             <Image
-              source={{ uri: selectedUser.photoURL || 'https://i.pravatar.cc/100?img=5' }}
+              source={{ uri: avatarUrl(selectedUser.photoURL, selectedUser.uid || (selectedUser as any).id) }}
               style={styles.selectedAvatar}
             />
             <View style={styles.selectedInfo}>
               <Text style={styles.selectedName}>{selectedUser.displayName}</Text>
               <Text style={styles.selectedUsername}>@{selectedUser.username}</Text>
             </View>
-            <Pressable onPress={() => setSelectedUser(null)}>
+            <Pressable
+              onPress={() => setSelectedUser(null)}
+              hitSlop={12}
+              accessibilityLabel="Remove selected user"
+              accessibilityRole="button"
+            >
               <Ionicons name="close-circle" size={20} color={colors.text.tertiary} />
             </Pressable>
           </View>
@@ -228,7 +247,7 @@ export default function FeaturedPersonModal() {
               onPress={() => setSelectedUser(item)}
             >
               <Image
-                source={{ uri: item.photoURL || 'https://i.pravatar.cc/100?img=3' }}
+                source={{ uri: avatarUrl(item.photoURL, item.uid || (item as any).id) }}
                 style={styles.userAvatar}
               />
               <View style={styles.userInfo}>
@@ -271,6 +290,12 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
     borderBottomWidth: 0.5,
     borderBottomColor: colors.ui.border,
+  },
+  headerIconButton: {
+    minWidth: 44,
+    minHeight: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   headerTitle: {
     fontFamily: fonts.serif.bold,

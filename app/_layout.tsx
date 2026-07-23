@@ -1,16 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SplashScreen from 'expo-splash-screen';
 import * as Font from 'expo-font';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
-import { StyleSheet, View, ActivityIndicator } from 'react-native';
-import { colors } from '../src/theme';
+import { StyleSheet, View, Text, Image, Animated } from 'react-native';
+import { colors, fonts } from '../src/theme';
+import { useAuthStore } from '../src/stores';
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [fontsLoaded, setFontsLoaded] = useState(false);
+  const [splashDone, setSplashDone] = useState(false);
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+
+  // Initialize the auth listener at the root so it persists across all route
+  // changes (otherwise unmounting `/index.tsx` after the initial redirect
+  // would leave no active onAuthStateChanged subscription).
+  useEffect(() => {
+    const unsubscribe = useAuthStore.getState().initialize();
+    return unsubscribe;
+  }, []);
 
   useEffect(() => {
     async function loadFonts() {
@@ -30,10 +41,10 @@ export default function RootLayout() {
     }
     loadFonts();
 
-    // Safety timeout — never stay on blank screen for more than 5s
+    // Safety timeout — never stay on blank screen for more than 8s
     const timeout = setTimeout(() => {
       setFontsLoaded(true);
-    }, 5000);
+    }, 8000);
 
     return () => clearTimeout(timeout);
   }, []);
@@ -41,13 +52,29 @@ export default function RootLayout() {
   useEffect(() => {
     if (fontsLoaded) {
       SplashScreen.hideAsync();
+      // Show custom splash for 4 seconds, then fade out
+      const timer = setTimeout(() => {
+        Animated.timing(fadeAnim, {
+          toValue: 0,
+          duration: 600,
+          useNativeDriver: true,
+        }).start(() => setSplashDone(true));
+      }, 4000);
+      return () => clearTimeout(timer);
     }
   }, [fontsLoaded]);
 
-  if (!fontsLoaded) {
+  if (!fontsLoaded || !splashDone) {
     return (
-      <View style={styles.loadingScreen}>
-        <ActivityIndicator size="large" color="#C9A84C" />
+      <View style={styles.splashScreen}>
+        <Animated.View style={[styles.splashContent, { opacity: fadeAnim }]}>
+          <Image
+            source={require('../assets/images/mermaid.png')}
+            style={styles.splashMermaid}
+            resizeMode="contain"
+          />
+          <Text style={styles.splashTagline}>Share your favorite places</Text>
+        </Animated.View>
       </View>
     );
   }
@@ -127,6 +154,34 @@ export default function RootLayout() {
             animation: 'slide_from_bottom',
           }}
         />
+        <Stack.Screen
+          name="modal/list-detail"
+          options={{
+            presentation: 'modal',
+            animation: 'slide_from_bottom',
+          }}
+        />
+        <Stack.Screen
+          name="modal/create-list"
+          options={{
+            presentation: 'modal',
+            animation: 'slide_from_bottom',
+          }}
+        />
+        <Stack.Screen
+          name="modal/conversation"
+          options={{
+            presentation: 'modal',
+            animation: 'slide_from_bottom',
+          }}
+        />
+        <Stack.Screen
+          name="modal/settings"
+          options={{
+            presentation: 'modal',
+            animation: 'slide_from_bottom',
+          }}
+        />
       </Stack>
     </GestureHandlerRootView>
   );
@@ -137,10 +192,25 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background.primary,
   },
-  loadingScreen: {
+  splashScreen: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0A1628',
+    backgroundColor: colors.background.primary,
+  },
+  splashContent: {
+    alignItems: 'center',
+  },
+  splashMermaid: {
+    width: 180,
+    height: 200,
+    marginBottom: 24,
+  },
+  splashTagline: {
+    fontFamily: 'Inter-Medium',
+    fontSize: 14,
+    color: colors.gold.muted,
+    letterSpacing: 2,
+    textTransform: 'lowercase',
   },
 });

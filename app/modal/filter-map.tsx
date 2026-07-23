@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, Image, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, StyleSheet, Pressable, ScrollView, Image, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -151,6 +151,22 @@ export default function FilterMapModal() {
       || 'friend'
     : null;
 
+  // Friend search state
+  const [friendSearch, setFriendSearch] = useState('');
+
+  // Filter friends and suggested users by search text
+  const filteredFriends = friendSearch
+    ? friends.filter((f) =>
+        f.displayName?.toLowerCase().includes(friendSearch.toLowerCase())
+      )
+    : friends;
+
+  const filteredSuggestedUsers = friendSearch
+    ? suggestedUsers.filter((u) =>
+        u.displayName?.toLowerCase().includes(friendSearch.toLowerCase())
+      )
+    : suggestedUsers;
+
   // All people to show: friends first, then suggestions
   const allPeople = [
     ...friends.map((f) => ({ uid: f.uid, displayName: f.displayName, photoURL: f.photoURL, isFriend: true })),
@@ -166,10 +182,13 @@ export default function FilterMapModal() {
     <View style={styles.overlay}>
       <Pressable style={styles.backdrop} onPress={() => router.back()} />
 
-      <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.xl }]}>
-        {/* Drag Handle */}
+      <View style={[styles.sheet, { paddingBottom: insets.bottom + spacing.xl, maxHeight: '85%' }]}>
+        {/* Drag Handle + Close */}
         <View style={styles.handleContainer}>
           <View style={styles.handle} />
+          <Pressable style={styles.closeButton} onPress={() => router.back()} hitSlop={8}>
+            <Ionicons name="close" size={22} color={colors.text.secondary} />
+          </Pressable>
         </View>
 
         {/* Header */}
@@ -180,7 +199,7 @@ export default function FilterMapModal() {
               size={20}
               color={colors.gold.primary}
             />
-            <Text style={styles.title}>Filter Places</Text>
+            <Text style={styles.title}>Filter</Text>
           </View>
           <View style={styles.headerActions}>
             <Pressable
@@ -244,16 +263,16 @@ export default function FilterMapModal() {
                     },
                   ]}
                 >
-                  {/* Emoji circle */}
+                  {/* Icon circle */}
                   <View
                     style={[
-                      styles.chipEmojiContainer,
+                      styles.chipIconContainer,
                       isActive
                         ? { backgroundColor: cat.color + '25' }
                         : { backgroundColor: colors.background.tertiary },
                     ]}
                   >
-                    <Text style={styles.chipEmoji}>{cat.emoji}</Text>
+                    <Ionicons name={cat.icon as any} size={16} color={isActive ? cat.color : colors.text.secondary} />
                   </View>
 
                   {/* Label */}
@@ -289,17 +308,6 @@ export default function FilterMapModal() {
 
           {/* Budget Section */}
           <View style={styles.budgetSection}>
-            <View style={styles.budgetHeader}>
-              <Ionicons name="wallet-outline" size={16} color={colors.gold.primary} />
-              <Text style={styles.budgetTitle}>Budget</Text>
-            </View>
-            <Text style={styles.subtitle}>
-              {budgetDraft.size === ALL_BUDGET_TIERS.length
-                ? 'All budget levels'
-                : budgetDraft.size === 0
-                  ? 'No budget filter'
-                  : `${budgetDraft.size} of ${ALL_BUDGET_TIERS.length} selected`}
-            </Text>
             <View style={styles.budgetRow}>
               {ALL_BUDGET_TIERS.map((tier) => {
                 const isActive = budgetDraft.has(tier);
@@ -315,9 +323,6 @@ export default function FilterMapModal() {
                     <Text style={[styles.budgetIcon, isActive && styles.budgetIconActive]}>
                       {BUDGET_ICONS[tier]}
                     </Text>
-                    <Text style={[styles.budgetLabel, isActive && styles.budgetLabelActive]}>
-                      {BUDGET_LABELS[tier]}
-                    </Text>
                   </Pressable>
                 );
               })}
@@ -328,13 +333,13 @@ export default function FilterMapModal() {
           <View style={styles.friendSection}>
             <View style={styles.budgetHeader}>
               <Ionicons name="people-outline" size={16} color={colors.gold.primary} />
-              <Text style={styles.budgetTitle}>By Person</Text>
+              <Text style={styles.budgetTitle}>Search by Member</Text>
             </View>
-            <Text style={styles.subtitle}>
-              {friendDraft
-                ? `Showing ${selectedFriendName}'s ${modeDraft === 'favorites' ? 'favorites' : 'picks'}`
-                : 'Tap a person to filter by their places'}
-            </Text>
+            {friendDraft && (
+              <Text style={styles.subtitle}>
+                {`Showing ${selectedFriendName}'s ${modeDraft === 'favorites' ? 'favorites' : 'picks'}`}
+              </Text>
+            )}
 
             {/* Mode toggle — only show when a friend is selected */}
             {friendDraft && (
@@ -368,12 +373,31 @@ export default function FilterMapModal() {
               </View>
             )}
 
+            {/* Friend Search Bar */}
+            <View style={styles.friendSearchContainer}>
+              <Ionicons name="search-outline" size={16} color={colors.text.tertiary} style={styles.friendSearchIcon} />
+              <TextInput
+                style={styles.friendSearchInput}
+                placeholder="Search members..."
+                placeholderTextColor={colors.text.tertiary}
+                value={friendSearch}
+                onChangeText={setFriendSearch}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              {friendSearch.length > 0 && (
+                <Pressable onPress={() => setFriendSearch('')} hitSlop={8}>
+                  <Ionicons name="close-circle" size={16} color={colors.text.tertiary} />
+                </Pressable>
+              )}
+            </View>
+
             {/* Friends */}
-            {friends.length > 0 && (
+            {filteredFriends.length > 0 && (
               <>
                 <Text style={styles.friendSectionLabel}>FRIENDS</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.friendScroll}>
-                  {friends.map((friend) => {
+                  {filteredFriends.map((friend) => {
                     const isActive = friendDraft === friend.uid;
                     return (
                       <Pressable
@@ -414,14 +438,14 @@ export default function FilterMapModal() {
             )}
 
             {/* Suggested People */}
-            {suggestedUsers.length > 0 && (
+            {filteredSuggestedUsers.length > 0 && (
               <>
-                <Text style={[styles.friendSectionLabel, { marginTop: spacing.md }]}>DISCOVER PEOPLE</Text>
+                <Text style={[styles.friendSectionLabel, { marginTop: spacing.md }]}>OTHERS</Text>
                 {loadingSuggestions ? (
                   <ActivityIndicator size="small" color={colors.gold.primary} style={{ marginVertical: spacing.md }} />
                 ) : (
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.friendScroll}>
-                    {suggestedUsers.slice(0, 12).map((u) => {
+                    {filteredSuggestedUsers.slice(0, 12).map((u) => {
                       const uid = u.uid || (u as any).id;
                       const isActive = friendDraft === uid;
                       return (
@@ -522,12 +546,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: spacing.md,
     paddingBottom: spacing.sm,
+    position: 'relative',
   },
   handle: {
     width: 32,
     height: 2,
     borderRadius: 1,
     backgroundColor: colors.gold.muted + '50',
+  },
+  closeButton: {
+    position: 'absolute',
+    top: spacing.sm,
+    right: spacing.md,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.background.tertiary,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 
   /* Header */
@@ -602,19 +638,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     borderRadius: radius.md,
     backgroundColor: colors.ui.cardBg,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.ui.border,
     gap: spacing.sm,
   },
-  chipEmojiContainer: {
+  chipIconContainer: {
     width: 32,
     height: 32,
     borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  chipEmoji: {
-    fontSize: 16,
   },
   chipLabel: {
     flex: 1,
@@ -668,40 +701,66 @@ const styles = StyleSheet.create({
   budgetChip: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: spacing.md,
+    paddingVertical: spacing.md + 2,
     borderRadius: radius.md,
     backgroundColor: colors.ui.cardBg,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: colors.ui.border,
     gap: 4,
   },
   budgetChipActive: {
-    backgroundColor: colors.gold.primary + '18',
-    borderColor: colors.gold.primary + '55',
+    backgroundColor: colors.gold.primary + '25',
+    borderColor: colors.gold.primary,
+    borderWidth: 1.5,
   },
   budgetIcon: {
     fontFamily: fonts.sans.semiBold,
-    fontSize: 14,
-    color: colors.text.tertiary,
+    fontSize: 16,
+    color: colors.text.secondary,
     letterSpacing: 1,
   },
   budgetIconActive: {
     color: colors.gold.primary,
   },
   budgetLabel: {
-    fontFamily: fonts.sans.medium,
+    fontFamily: fonts.sans.semiBold,
     fontSize: 10,
     color: colors.text.tertiary,
     letterSpacing: 0.5,
   },
   budgetLabelActive: {
-    color: colors.gold.primary,
+    color: colors.gold.light,
+  },
+  starChipIcons: {
+    flexDirection: 'row',
+    gap: 1,
   },
 
   /* Friend Filter */
   friendSection: {
     paddingHorizontal: spacing.xl,
     marginBottom: spacing.xl,
+  },
+  friendSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.ui.cardBg,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.ui.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  friendSearchIcon: {
+    marginRight: spacing.sm,
+  },
+  friendSearchInput: {
+    flex: 1,
+    fontFamily: fonts.sans.regular,
+    fontSize: 14,
+    color: colors.text.primary,
+    padding: 0,
   },
   friendSectionLabel: {
     fontFamily: fonts.sans.semiBold,

@@ -1,123 +1,155 @@
-import React, { useEffect } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
-  Image,
   Pressable,
   ActivityIndicator,
+  ScrollView,
+  Linking,
 } from 'react-native';
+import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useRouter } from 'expo-router';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors, fonts, spacing, radius, shadows } from '../../src/theme';
-import { useFeedStore } from '../../src/stores';
-import type { FeedItem, FeedItemType } from '../../src/types';
+import { useGuidesStore, useAuthStore } from '../../src/stores';
+import { avatarUrl } from '../../src/utils/placeholderAvatar';
+import type { Guide } from '../../src/types';
 
-/**
- * Converts a Firebase Timestamp (or Timestamp-like object with `seconds`) into
- * a human-readable relative string such as "2h ago" or "3d ago".
- */
-function getRelativeTime(createdAt: { seconds: number }): string {
-  const now = Date.now();
-  const then = createdAt.seconds * 1000;
-  const diffMs = now - then;
-
-  const seconds = Math.floor(diffMs / 1000);
-  if (seconds < 60) return 'just now';
-
-  const minutes = Math.floor(seconds / 60);
-  if (minutes < 60) return `${minutes}m ago`;
-
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-
-  const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d ago`;
-
-  const weeks = Math.floor(days / 7);
-  if (weeks < 4) return `${weeks}w ago`;
-
-  const months = Math.floor(days / 30);
-  if (months < 12) return `${months}mo ago`;
-
-  const years = Math.floor(days / 365);
-  return `${years}y ago`;
-}
-
-function getFeedText(item: FeedItem): string {
-  switch (item.type) {
-    case 'new_place':
-      return `added ${item.placeName}`;
-    case 'review':
-      return `reviewed ${item.placeName}`;
-    case 'friend_added':
-      return `became friends with ${item.targetUserName}`;
-    case 'place_saved':
-      return `saved ${item.placeName}`;
-    default:
-      return '';
-  }
-}
-
-function getFeedIcon(type: FeedItemType): keyof typeof Ionicons.glyphMap {
-  switch (type) {
-    case 'new_place':
-      return 'add-circle';
-    case 'review':
-      return 'star';
-    case 'friend_added':
-      return 'people';
-    case 'place_saved':
-      return 'heart';
-    default:
-      return 'ellipse';
-  }
-}
-
-function FeedCard({ item }: { item: FeedItem }) {
-  return (
-    <Pressable style={styles.feedCard}>
-      <View style={styles.feedCardAccent} />
-      <View style={styles.feedCardHeader}>
-        <Image source={{ uri: item.actorPhoto }} style={styles.feedAvatar} />
-        <View style={styles.feedTextContainer}>
-          <Text style={styles.feedText}>
-            <Text style={styles.feedActorName}>{item.actorName}</Text>
-            {'  '}
-            {getFeedText(item)}
-          </Text>
-          <Text style={styles.feedTime}>{getRelativeTime(item.createdAt)}</Text>
-        </View>
-        <View style={styles.feedIconBadge}>
-          <Ionicons
-            name={getFeedIcon(item.type)}
-            size={13}
-            color={colors.gold.primary}
-          />
-        </View>
-      </View>
-      {item.placeImageURL ? (
-        <Image source={{ uri: item.placeImageURL }} style={styles.feedImage} />
-      ) : null}
-    </Pressable>
-  );
-}
-
-export default function FeedScreen() {
+export default function GuidesScreen() {
   const insets = useSafeAreaInsets();
-  const { feedItems, isLoading, fetchFeed } = useFeedStore();
+  const router = useRouter();
+  const user = useAuthStore((s) => s.user);
+  const { guides, isLoading, fetchGuides, toggleLike } = useGuidesStore();
 
-  useEffect(() => {
-    fetchFeed();
-  }, []);
+  const [selectedCity, setSelectedCity] = useState<string | null>(null);
 
-  if (isLoading && feedItems.length === 0) {
+  useFocusEffect(
+    useCallback(() => {
+      fetchGuides();
+    }, []),
+  );
+
+  // Get unique cities from guides
+  const cities = useMemo(() => {
+    const citySet = new Set<string>();
+    guides.forEach((g) => {
+      if (g.city) citySet.add(g.city);
+    });
+    return Array.from(citySet).sort();
+  }, [guides]);
+
+  // Filter guides by city
+  const filteredGuides = useMemo(() => {
+    if (!selectedCity) return guides;
+    return guides.filter((g) => g.city === selectedCity);
+  }, [guides, selectedCity]);
+
+  const handleOpenLink = (url: string) => {
+    let finalUrl = url.trim();
+    if (finalUrl && !finalUrl.startsWith('http://') && !finalUrl.startsWith('https://')) {
+      finalUrl = 'https://' + finalUrl;
+    }
+    if (finalUrl) Linking.openURL(finalUrl).catch(() => {});
+  };
+
+  const renderGuideCard = useCallback(
+    ({ item: guide }: { item: Guide }) => {
+      const isLiked = guide.likedBy?.includes(user?.uid ?? '');
+      const hasLink = !!guide.websiteURL?.trim();
+
+      return (
+        <View style={styles.guideCard}>
+          {/* Photo + Info Row */}
+          <View style={styles.guideTopRow}>
+            {guide.photoURL ? (
+              <Image source={{ uri: guide.photoURL }} style={styles.guidePhoto} />
+            ) : (
+              <View style={[styles.guidePhoto, styles.guidePhotoPlaceholder]}>
+                <Ionicons name="person-outline" size={24} color={colors.gold.muted} />
+              </View>
+            )}
+            <View style={styles.guideInfo}>
+              <Text style={styles.guideName}>{guide.name}</Text>
+              <View style={styles.guideLocationRow}>
+                <Ionicons name="location" size={12} color={colors.gold.primary} />
+                <Text style={styles.guideLocation}>
+                  {guide.city}{guide.country ? `, ${guide.country}` : ''}
+                </Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Description */}
+          {guide.description ? (
+            <Text style={styles.guideDescription} numberOfLines={4}>
+              {guide.description}
+            </Text>
+          ) : null}
+
+          {/* Website Link */}
+          {hasLink && (
+            <Pressable style={styles.guideLinkRow} onPress={() => handleOpenLink(guide.websiteURL)}>
+              <Ionicons name="globe-outline" size={14} color={colors.gold.primary} />
+              <Text style={styles.guideLinkText} numberOfLines={1}>
+                {guide.websiteURL.replace(/^https?:\/\/(www\.)?/, '')}
+              </Text>
+              <Ionicons name="open-outline" size={12} color={colors.text.tertiary} />
+            </Pressable>
+          )}
+
+          {/* Footer: recommended by + actions */}
+          <View style={styles.guideFooter}>
+            <View style={styles.guideRecommendedBy}>
+              <Image
+                source={{ uri: avatarUrl(guide.userPhoto, guide.userId) }}
+                style={styles.guideRecommenderAvatar}
+              />
+              <Text style={styles.guideRecommenderText}>
+                Added by {guide.userName}
+              </Text>
+            </View>
+            <View style={styles.guideActions}>
+              <Pressable style={styles.guideActionButton} onPress={() => toggleLike(guide.id)}>
+                <Ionicons
+                  name={isLiked ? 'heart' : 'heart-outline'}
+                  size={16}
+                  color={isLiked ? colors.gold.primary : colors.text.tertiary}
+                />
+                {(guide.likesCount || 0) > 0 && (
+                  <Text style={[styles.guideActionText, isLiked && { color: colors.gold.primary }]}>
+                    {guide.likesCount}
+                  </Text>
+                )}
+              </Pressable>
+              {guide.userId === user?.uid && (
+                <Pressable
+                  style={styles.guideActionButton}
+                  onPress={() => {
+                    const { deleteGuide } = useGuidesStore.getState();
+                    deleteGuide(guide.id);
+                  }}
+                >
+                  <Ionicons name="trash-outline" size={14} color={colors.text.tertiary} />
+                </Pressable>
+              )}
+            </View>
+          </View>
+        </View>
+      );
+    },
+    [user?.uid, toggleLike],
+  );
+
+  if (isLoading && guides.length === 0) {
     return (
       <View style={[styles.container, { paddingTop: insets.top }]}>
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>Feed</Text>
-          <Text style={styles.headerSubtitle}>Friends' Activity</Text>
+          <Text style={styles.headerTitle}>Guides</Text>
+          <Text style={styles.headerSubtitle}>RECOMMENDED TOUR GUIDES</Text>
         </View>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.gold.primary} />
@@ -130,30 +162,71 @@ export default function FeedScreen() {
     <View style={[styles.container, { paddingTop: insets.top }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>Feed</Text>
-        <Text style={styles.headerSubtitle}>Friends' Activity</Text>
+        <View style={{ flex: 1 }}>
+          <Text style={styles.headerTitle}>Guides</Text>
+          <Text style={styles.headerSubtitle}>RECOMMENDED TOUR GUIDES</Text>
+        </View>
+        <Pressable
+          style={styles.addButton}
+          onPress={() => router.push('/modal/write-guide' as any)}
+        >
+          <Ionicons name="add" size={20} color={colors.background.primary} />
+          <Text style={styles.addButtonText}>Add</Text>
+        </Pressable>
       </View>
 
+      {/* City Filter */}
+      {cities.length > 0 && (
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}
+        >
+          <Pressable
+            style={[styles.filterChip, !selectedCity && styles.filterChipActive]}
+            onPress={() => setSelectedCity(null)}
+          >
+            <Text style={[styles.filterChipText, !selectedCity && styles.filterChipTextActive]}>
+              All
+            </Text>
+          </Pressable>
+          {cities.map((city) => (
+            <Pressable
+              key={city}
+              style={[styles.filterChip, selectedCity === city && styles.filterChipActive]}
+              onPress={() => setSelectedCity(selectedCity === city ? null : city)}
+            >
+              <Text style={[styles.filterChipText, selectedCity === city && styles.filterChipTextActive]}>
+                {city}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+      )}
+
+      {/* Guides List */}
       <FlatList
-        data={feedItems}
+        data={filteredGuides}
         showsVerticalScrollIndicator={false}
-        contentContainerStyle={styles.feedList}
+        contentContainerStyle={styles.guidesList}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => <FeedCard item={item} />}
+        renderItem={renderGuideCard}
         ItemSeparatorComponent={() => <View style={{ height: spacing.md }} />}
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <View style={styles.emptyIconCircle}>
-              <Ionicons
-                name="people-outline"
-                size={32}
-                color={colors.gold.muted}
-              />
+              <Ionicons name="compass-outline" size={32} color={colors.gold.muted} />
             </View>
-            <Text style={styles.emptyTitle}>No activity yet</Text>
+            <Text style={styles.emptyTitle}>No guides yet</Text>
             <Text style={styles.emptySubtitle}>
-              Add friends to see their discoveries
+              Know a great tour guide? Add them here{'\n'}so your friends can find them too.
             </Text>
+            <Pressable
+              style={styles.emptyButton}
+              onPress={() => router.push('/modal/write-guide' as any)}
+            >
+              <Text style={styles.emptyButtonText}>Add a Guide</Text>
+            </Pressable>
           </View>
         }
       />
@@ -167,101 +240,199 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background.primary,
   },
   header: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingVertical: spacing.md,
   },
   headerTitle: {
     fontFamily: fonts.serif.bold,
-    fontSize: 32,
+    fontSize: 28,
     color: colors.text.primary,
     letterSpacing: 0.3,
   },
   headerSubtitle: {
     fontFamily: fonts.sans.medium,
-    fontSize: 11,
+    fontSize: 10,
     color: colors.text.tertiary,
-    marginTop: 4,
-    textTransform: 'uppercase',
+    marginTop: 2,
     letterSpacing: 1.5,
   },
-  feedList: {
+  addButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: colors.gold.primary,
     paddingHorizontal: spacing.lg,
-    paddingBottom: 20,
+    paddingVertical: 8,
+    borderRadius: radius.sm,
+  },
+  addButtonText: {
+    fontFamily: fonts.sans.semiBold,
+    fontSize: 13,
+    color: colors.background.primary,
+    letterSpacing: 0.5,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  // Feed Card
-  feedCard: {
+
+  // Filter
+  filterRow: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.md,
+    gap: 8,
+  },
+  filterChip: {
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+    borderRadius: radius.sm,
     backgroundColor: colors.ui.cardBg,
-    borderRadius: radius.lg,
-    overflow: 'hidden',
     borderWidth: 0.5,
     borderColor: colors.ui.border,
-    ...shadows.sm,
   },
-  feedCardAccent: {
-    height: 1,
-    backgroundColor: colors.gold.muted,
-    opacity: 0.5,
+  filterChipActive: {
+    backgroundColor: colors.gold.primary + '20',
+    borderColor: colors.gold.primary,
   },
-  feedCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: spacing.md,
-    gap: spacing.md,
-  },
-  feedAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: colors.gold.muted,
-  },
-  feedTextContainer: {
-    flex: 1,
-    gap: 3,
-  },
-  feedText: {
-    fontFamily: fonts.sans.regular,
-    fontSize: 14,
-    color: colors.text.secondary,
-    lineHeight: 20,
-    letterSpacing: 0.15,
-  },
-  feedActorName: {
-    fontFamily: fonts.serif.regular,
-    color: colors.text.primary,
-    fontSize: 15,
-  },
-  feedTime: {
-    fontFamily: fonts.sans.regular,
-    fontSize: 11,
+  filterChipText: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 12,
     color: colors.text.tertiary,
     letterSpacing: 0.3,
   },
-  feedIconBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: colors.gold.primary + '0D',
-    borderWidth: 0.5,
-    borderColor: colors.gold.muted + '40',
-    justifyContent: 'center',
-    alignItems: 'center',
+  filterChipTextActive: {
+    color: colors.gold.primary,
   },
-  feedImage: {
-    width: '100%',
-    height: 180,
+
+  // Guides List
+  guidesList: {
+    paddingHorizontal: spacing.lg,
+    paddingBottom: spacing.xxxl,
+  },
+
+  // Guide Card
+  guideCard: {
+    backgroundColor: colors.ui.cardBg,
+    borderRadius: radius.lg,
+    padding: spacing.lg,
+    borderWidth: 0.5,
+    borderColor: colors.ui.border,
+    gap: spacing.md,
+    ...shadows.sm,
+  },
+  guideTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  guidePhoto: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: colors.background.tertiary,
   },
+  guidePhotoPlaceholder: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.ui.border,
+  },
+  guideInfo: {
+    flex: 1,
+    gap: 3,
+  },
+  guideName: {
+    fontFamily: fonts.serif.bold,
+    fontSize: 18,
+    color: colors.text.primary,
+    letterSpacing: 0.2,
+  },
+  guideLocationRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  guideLocation: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 13,
+    color: colors.text.secondary,
+  },
+  guideDescription: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 14,
+    color: colors.text.secondary,
+    lineHeight: 21,
+    letterSpacing: 0.15,
+  },
+  guideLinkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.gold.primary + '0A',
+    borderRadius: radius.sm,
+    borderWidth: 0.5,
+    borderColor: colors.gold.primary + '25',
+  },
+  guideLinkText: {
+    flex: 1,
+    fontFamily: fonts.sans.medium,
+    fontSize: 13,
+    color: colors.gold.primary,
+  },
+  guideFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: spacing.sm,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.ui.divider,
+  },
+  guideRecommendedBy: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flex: 1,
+  },
+  guideRecommenderAvatar: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    borderWidth: 0.5,
+    borderColor: colors.gold.muted,
+  },
+  guideRecommenderText: {
+    fontFamily: fonts.sans.regular,
+    fontSize: 11,
+    color: colors.text.tertiary,
+    letterSpacing: 0.2,
+  },
+  guideActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+  },
+  guideActionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    padding: 4,
+  },
+  guideActionText: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 12,
+    color: colors.text.tertiary,
+  },
+
   // Empty
   emptyState: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 120,
+    paddingTop: 100,
     gap: spacing.md,
   },
   emptyIconCircle: {
@@ -279,12 +450,25 @@ const styles = StyleSheet.create({
     fontSize: 20,
     color: colors.text.primary,
     marginTop: spacing.md,
-    letterSpacing: 0.3,
   },
   emptySubtitle: {
     fontFamily: fonts.sans.regular,
     fontSize: 14,
     color: colors.text.tertiary,
-    letterSpacing: 0.2,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  emptyButton: {
+    marginTop: spacing.md,
+    backgroundColor: colors.gold.primary,
+    paddingHorizontal: spacing.xl,
+    paddingVertical: 10,
+    borderRadius: radius.sm,
+  },
+  emptyButtonText: {
+    fontFamily: fonts.sans.semiBold,
+    fontSize: 14,
+    color: colors.background.primary,
+    letterSpacing: 0.5,
   },
 });
