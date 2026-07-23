@@ -1,0 +1,61 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "friendRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "fromUid", "order": "ASCENDING" },
+        { "fieldPath": "toUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "friendRequests",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "toUid", "order": "ASCENDING" },
+        { "fieldPath": "fromUid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "friends",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "uid", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "userPlaces",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "isFavorite", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "userPlaces",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "placeId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "placeVisits",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "userId", "order": "ASCENDING" },
+        { "fieldPath": "placeId", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "conversationId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

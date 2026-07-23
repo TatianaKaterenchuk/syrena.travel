@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Syrena Voyager — Place</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #050D3D;
+      color: #E8E4DC;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 28px 16px 60px; }
+    .brand {
+      text-align: center; color: #D4AF37; letter-spacing: 4px;
+      font-size: 13px; font-weight: 600; margin-bottom: 22px;
+    }
+    .card {
+      background: #0A1264; border: 1px solid #0E1570;
+      border-radius: 14px; overflow: hidden;
+    }
+    .card img { width: 100%; height: 260px; object-fit: cover; display: block; background: #060D48; }
+    .card-body { padding: 20px; }
+    h1 { font-family: Georgia, 'Times New Roman', serif; font-size: 24px; color: #F5F0E8; margin-bottom: 6px; }
+    .meta { color: #D4AF37; font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 6px; }
+    .stars { color: #D4AF37; font-size: 13px; margin-left: 6px; }
+    .by { color: #8A90B5; font-size: 13px; margin-bottom: 14px; }
+    .desc { color: #C9CDE4; font-size: 15px; line-height: 1.6; margin-bottom: 14px; }
+    .musttry {
+      border: 1px solid rgba(212, 175, 55, 0.35); background: rgba(212, 175, 55, 0.07);
+      border-radius: 10px; padding: 12px 14px; margin-bottom: 14px;
+    }
+    .musttry .label { color: #D4AF37; font-size: 11px; letter-spacing: 1.5px; font-weight: 600; margin-bottom: 4px; }
+    .musttry .text { color: #E0DCCF; font-size: 14.5px; line-height: 1.5; }
+    .addr { color: #8A90B5; font-size: 13.5px; margin-bottom: 6px; }
+    .maps { color: #D4AF37; font-size: 14px; text-decoration: none; font-weight: 500; }
+    .maps:hover { text-decoration: underline; }
+    .gallery { display: flex; gap: 8px; padding: 0 20px 20px; overflow-x: auto; }
+    .gallery img { width: 130px; height: 96px; object-fit: cover; border-radius: 8px; flex-shrink: 0; }
+    .state { text-align: center; padding: 70px 20px; color: #9BA0C0; font-size: 15px; }
+    .footer { margin-top: 32px; text-align: center; color: #8A90B5; font-size: 13px; line-height: 1.7; }
+    .footer a { color: #D4AF37; text-decoration: none; font-weight: 600; }
+    .spinner {
+      width: 28px; height: 28px; margin: 70px auto 12px;
+      border: 3px solid #0E1570; border-top-color: #D4AF37;
+      border-radius: 50%; animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">S Y R E N A &nbsp; V O Y A G E R</div>
+    <div id="content"><div class="spinner"></div><div class="state" style="padding-top:0">Loading…</div></div>
+    <div class="footer">
+      Shared from <strong>Syrena Voyager</strong> — an invite-only community of
+      trusted travel recommendations.<br>
+      <a href="https://apps.apple.com/app/id6759737888">Get the app on the App Store</a>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+    import { getFirestore, doc, getDoc } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+    const app = initializeApp({
+      apiKey: 'AIzaSyBJhp6GtUond492KD-Od85sq8eDg9jFzX4',
+      authDomain: 'syrena-travel.firebaseapp.com',
+      projectId: 'syrena-travel',
+    });
+    const db = getFirestore(app);
+
+    const params = new URLSearchParams(location.search);
+    const id = params.get('id');
+    const content = document.getElementById('content');
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+    const STAR_LABELS = { 1: 'Solid', 2: 'Special', 3: 'Mindblowing' };
+
+    async function main() {
+      if (!id) {
+        content.innerHTML = '<div class="state">This link is missing its place. Ask your friend to share it again.</div>';
+        return;
+      }
+      try {
+        const snap = await getDoc(doc(db, 'places', id));
+        if (!snap.exists()) {
+          content.innerHTML = '<div class="state">This place is no longer available.</div>';
+          return;
+        }
+        const p = snap.data();
+        document.title = `${p.name} — Syrena Voyager`;
+
+        const hero = Array.isArray(p.imageURLs) && p.imageURLs[0]
+          ? `<img src="${esc(p.imageURLs[0])}" alt="${esc(p.name)}">`
+          : '';
+        const gallery = (p.imageURLs || []).slice(1, 5).map(
+          (u) => `<img src="${esc(u)}" alt="" loading="lazy">`,
+        ).join('');
+        const stars = p.starRating
+          ? `<span class="stars">${'★'.repeat(p.starRating)} ${STAR_LABELS[p.starRating] ?? ''}</span>`
+          : '';
+        const budget = p.budgetTier ? ` · ${'$'.repeat(p.budgetTier)}` : '';
+        const isDrinks = p.category === 'bar' || p.category === 'club';
+        const mustTry = p.mustTry
+          ? `<div class="musttry"><div class="label">${isDrinks ? 'MUST-TRY DRINKS' : 'MUST-TRY DISHES'}</div><div class="text">${esc(p.mustTry)}</div></div>`
+          : '';
+        const mapsQuery = encodeURIComponent(`${p.name} ${p.address || ''} ${p.city || ''}`);
+
+        content.innerHTML = `<div class="card">
+          ${hero}
+          <div class="card-body">
+            <div class="meta">${esc(p.category || 'place')}${budget}${stars}</div>
+            <h1>${esc(p.name)}</h1>
+            <div class="by">${esc(p.city || '')}${p.country ? `, ${esc(p.country)}` : ''}${p.createdByName ? ` · recommended by ${esc(p.createdByName)}` : ''}</div>
+            ${p.description ? `<div class="desc">${esc(p.description)}</div>` : ''}
+            ${mustTry}
+            ${p.address ? `<div class="addr">${esc(p.address)}</div>` : ''}
+            <a class="maps" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${mapsQuery}">Open in Google Maps →</a>
+          </div>
+          ${gallery ? `<div class="gallery">${gallery}</div>` : ''}
+        </div>`;
+      } catch (err) {
+        console.error(err);
+        content.innerHTML = '<div class="state">Could not load this place. Please try again later.</div>';
+      }
+    }
+    main();
+  </script>
+</body>
+</html>

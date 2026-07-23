@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Syrena Voyager — City Picks</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #050D3D;
+      color: #E8E4DC;
+      min-height: 100vh;
+    }
+    .wrap { max-width: 640px; margin: 0 auto; padding: 28px 16px 60px; }
+    .brand {
+      text-align: center;
+      color: #D4AF37;
+      letter-spacing: 4px;
+      font-size: 13px;
+      font-weight: 600;
+      margin-bottom: 6px;
+    }
+    h1 {
+      text-align: center;
+      font-family: Georgia, 'Times New Roman', serif;
+      font-weight: 600;
+      font-size: 26px;
+      color: #F5F0E8;
+      margin-bottom: 4px;
+    }
+    .sub { text-align: center; color: #9BA0C0; font-size: 14px; margin-bottom: 28px; }
+    .card {
+      background: #0A1264;
+      border: 1px solid #0E1570;
+      border-radius: 14px;
+      overflow: hidden;
+      margin-bottom: 18px;
+    }
+    .card img { width: 100%; height: 210px; object-fit: cover; display: block; background: #060D48; }
+    .card-body { padding: 16px; }
+    .card h2 { font-family: Georgia, serif; font-size: 19px; color: #F5F0E8; margin-bottom: 4px; }
+    .meta { color: #D4AF37; font-size: 12px; letter-spacing: 1.5px; text-transform: uppercase; margin-bottom: 10px; }
+    .stars { color: #D4AF37; font-size: 13px; margin-left: 6px; }
+    .desc { color: #C9CDE4; font-size: 14.5px; line-height: 1.55; margin-bottom: 10px; }
+    .musttry {
+      border: 1px solid rgba(212, 175, 55, 0.35);
+      background: rgba(212, 175, 55, 0.07);
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+    }
+    .musttry .label { color: #D4AF37; font-size: 11px; letter-spacing: 1.5px; font-weight: 600; margin-bottom: 3px; }
+    .musttry .text { color: #E0DCCF; font-size: 14px; line-height: 1.45; }
+    .addr { color: #8A90B5; font-size: 13px; margin-bottom: 4px; }
+    .maps { color: #D4AF37; font-size: 13.5px; text-decoration: none; font-weight: 500; }
+    .maps:hover { text-decoration: underline; }
+    .state { text-align: center; padding: 60px 20px; color: #9BA0C0; font-size: 15px; }
+    .footer {
+      margin-top: 36px; text-align: center; color: #8A90B5; font-size: 13px; line-height: 1.7;
+    }
+    .footer a { color: #D4AF37; text-decoration: none; font-weight: 600; }
+    .spinner {
+      width: 28px; height: 28px; margin: 70px auto 12px;
+      border: 3px solid #0E1570; border-top-color: #D4AF37;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="brand">S Y R E N A &nbsp; V O Y A G E R</div>
+    <h1 id="title">City Picks</h1>
+    <div class="sub" id="subtitle"></div>
+    <div id="content"><div class="spinner"></div><div class="state" style="padding-top:0">Loading recommendations…</div></div>
+    <div class="footer">
+      Shared from <strong>Syrena Voyager</strong> — an invite-only community of
+      trusted travel recommendations.<br>
+      <a href="https://apps.apple.com/app/id6759737888">Get the app on the App Store</a>
+    </div>
+  </div>
+
+  <script type="module">
+    import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+    import { getFirestore, collection, query, where, getDocs } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+    const app = initializeApp({
+      apiKey: 'AIzaSyBJhp6GtUond492KD-Od85sq8eDg9jFzX4',
+      authDomain: 'syrena-travel.firebaseapp.com',
+      projectId: 'syrena-travel',
+    });
+    const db = getFirestore(app);
+
+    const params = new URLSearchParams(location.search);
+    const uid = params.get('u');
+    const city = params.get('city');
+    const sharerName = params.get('n');
+
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+
+    const content = document.getElementById('content');
+    const titleEl = document.getElementById('title');
+    const subEl = document.getElementById('subtitle');
+
+    const STAR_LABELS = { 1: 'Solid', 2: 'Special', 3: 'Mindblowing' };
+
+    async function main() {
+      if (!uid || !city) {
+        content.innerHTML = '<div class="state">This link is missing its city or user. Ask your friend to share it again.</div>';
+        return;
+      }
+
+      document.title = `${city} picks — Syrena Voyager`;
+      titleEl.textContent = city;
+      subEl.textContent = sharerName
+        ? `${sharerName}'s recommendations`
+        : 'Recommendations from a Syrena Voyager member';
+
+      try {
+        const q = query(
+          collection(db, 'places'),
+          where('createdBy', '==', uid),
+          where('city', '==', city),
+        );
+        const snap = await getDocs(q);
+        const places = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+        if (places.length === 0) {
+          content.innerHTML = '<div class="state">No recommendations found for this city (yet).</div>';
+          return;
+        }
+
+        // Best first: star rating desc, then name
+        places.sort((a, b) => (b.starRating ?? 0) - (a.starRating ?? 0) || a.name.localeCompare(b.name));
+
+        content.innerHTML = places.map((p) => {
+          const img = Array.isArray(p.imageURLs) && p.imageURLs[0]
+            ? `<img src="${esc(p.imageURLs[0])}" alt="${esc(p.name)}" loading="lazy">`
+            : '';
+          const stars = p.starRating
+            ? `<span class="stars">${'★'.repeat(p.starRating)} ${STAR_LABELS[p.starRating] ?? ''}</span>`
+            : '';
+          const budget = p.budgetTier ? ` · ${'$'.repeat(p.budgetTier)}` : '';
+          const isDrinks = p.category === 'bar' || p.category === 'club';
+          const mustTry = p.mustTry
+            ? `<div class="musttry"><div class="label">${isDrinks ? 'MUST-TRY DRINKS' : 'MUST-TRY DISHES'}</div><div class="text">${esc(p.mustTry)}</div></div>`
+            : '';
+          const desc = p.description ? `<div class="desc">${esc(p.description)}</div>` : '';
+          const mapsQuery = encodeURIComponent(`${p.name} ${p.address || ''} ${p.city}`);
+          return `<div class="card">${img}<div class="card-body">
+            <h2>${esc(p.name)}</h2>
+            <div class="meta">${esc(p.category || 'place')}${budget}${stars}</div>
+            ${desc}${mustTry}
+            ${p.address ? `<div class="addr">${esc(p.address)}</div>` : ''}
+            <a class="maps" target="_blank" rel="noopener" href="https://www.google.com/maps/search/?api=1&query=${mapsQuery}">Open in Google Maps →</a>
+          </div></div>`;
+        }).join('');
+      } catch (err) {
+        console.error(err);
+        content.innerHTML = '<div class="state">Could not load recommendations. Please try again later.</div>';
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>

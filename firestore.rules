@@ -1,0 +1,200 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ------------------------------------------------------------------
+    // Helpers
+    // ------------------------------------------------------------------
+    function signedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      return signedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+    // Client-side admin bootstrap: these emails may set isAdmin/status on
+    // their OWN doc (mirrors ADMIN_EMAILS in useAuthStore.initialize).
+    function isBootstrapAdminEmail() {
+      return signedIn() && request.auth.token.email in [
+        'grotkowskaaleksandra3@gmail.com',
+        'mkarnow@gmail.com'
+      ];
+    }
+    // The App Review demo account may heal its own status (scripts/verify-demo-account.js).
+    function isDemoAccount() {
+      return signedIn() && request.auth.token.email == 'reviewer@syrenatravel.app';
+    }
+
+    // ------------------------------------------------------------------
+    // users — profile docs, id == uid
+    // Members can read each other (friend search, profiles, push tokens);
+    // only you (or an admin) can write your doc, and privileged fields
+    // (isAdmin/status) are locked to admins + the bootstrap emails.
+    // ------------------------------------------------------------------
+    match /users/{userId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.auth.uid == userId;
+      allow update: if
+        isAdmin() ||
+        (
+          signedIn() && request.auth.uid == userId &&
+          (
+            !request.resource.data.diff(resource.data).affectedKeys().hasAny(['isAdmin', 'status']) ||
+            isBootstrapAdminEmail() ||
+            (isDemoAccount() &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status']))
+          )
+        );
+      allow delete: if isAdmin() || (signedIn() && request.auth.uid == userId);
+    }
+
+    // ------------------------------------------------------------------
+    // places — community recommendation content
+    // Public read (powers the shared city web pages). Creation is tied to
+    // the author; edits by author/admin, plus counter-only updates
+    // (saves/been/rating) from any member.
+    // ------------------------------------------------------------------
+    match /places/{placeId} {
+      allow read: if true;
+      allow create: if signedIn() && request.resource.data.createdBy == request.auth.uid;
+      allow update: if
+        isAdmin() ||
+        (signedIn() && resource.data.createdBy == request.auth.uid) ||
+        (signedIn() &&
+          request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['savesCount', 'beenCount', 'rating', 'ratingCount', 'updatedAt']));
+      allow delete: if isAdmin() || (signedIn() && resource.data.createdBy == request.auth.uid);
+    }
+
+    // ------------------------------------------------------------------
+    // userPlaces — personal saves/favorites. Owner-only writes.
+    // Reads stay member-wide (friends' places view).
+    // ------------------------------------------------------------------
+    match /userPlaces/{docId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if signedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // ------------------------------------------------------------------
+    // friends — friendship links. IMPORTANT: accepting a request creates
+    // docs for BOTH parties, and identity fan-out updates docs where you
+    // are the `uid` (your card on someone else's list). So writes are
+    // allowed when you're on EITHER side of the link.
+    // ------------------------------------------------------------------
+    match /friends/{docId} {
+      allow read: if signedIn();
+      allow create: if signedIn() &&
+        (request.resource.data.userId == request.auth.uid ||
+         request.resource.data.uid == request.auth.uid);
+      allow update: if signedIn() &&
+        (resource.data.userId == request.auth.uid ||
+         resource.data.uid == request.auth.uid);
+      allow delete: if isAdmin() ||
+        (signedIn() &&
+          (resource.data.userId == request.auth.uid ||
+           resource.data.uid == request.auth.uid));
+    }
+
+    // ------------------------------------------------------------------
+    // friendRequests — sender creates; either party updates/deletes.
+    // ------------------------------------------------------------------
+    match /friendRequests/{docId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.fromUid == request.auth.uid;
+      allow update: if signedIn() &&
+        (resource.data.fromUid == request.auth.uid ||
+         resource.data.toUid == request.auth.uid);
+      allow delete: if isAdmin() ||
+        (signedIn() &&
+          (resource.data.fromUid == request.auth.uid ||
+           resource.data.toUid == request.auth.uid));
+    }
+
+    // ------------------------------------------------------------------
+    // conversations + messages — participants only.
+    // ------------------------------------------------------------------
+    match /conversations/{convoId} {
+      allow read: if signedIn() && request.auth.uid in resource.data.participants;
+      allow create: if signedIn() && request.auth.uid in request.resource.data.participants;
+      allow update: if signedIn() && request.auth.uid in resource.data.participants;
+      allow delete: if isAdmin();
+    }
+    match /messages/{messageId} {
+      // All messages in a query share one conversationId, so the get() is
+      // cached and counts as a single document access.
+      allow read: if signedIn() &&
+        request.auth.uid in
+          get(/databases/$(database)/documents/conversations/$(resource.data.conversationId)).data.participants;
+      allow create: if signedIn() &&
+        request.resource.data.senderId == request.auth.uid &&
+        request.auth.uid in
+          get(/databases/$(database)/documents/conversations/$(request.resource.data.conversationId)).data.participants;
+      allow update, delete: if isAdmin() ||
+        (signedIn() && resource.data.senderId == request.auth.uid);
+    }
+
+    // ------------------------------------------------------------------
+    // userLists — owner-only writes.
+    // ------------------------------------------------------------------
+    match /userLists/{docId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if signedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // ------------------------------------------------------------------
+    // placeVisits — owner-only writes ("been there" marks).
+    // ------------------------------------------------------------------
+    match /placeVisits/{docId} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if signedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+    }
+
+    // ------------------------------------------------------------------
+    // Moderation queues — anyone can file, admins resolve.
+    // ------------------------------------------------------------------
+    match /editSuggestions/{docId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if isAdmin();
+    }
+    match /deletionRequests/{docId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // ------------------------------------------------------------------
+    // Featured content — admins manage; the featured person may edit
+    // their own picks.
+    // ------------------------------------------------------------------
+    match /featuredPerson/{docId} {
+      allow read: if signedIn();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || (signedIn() && resource.data.uid == request.auth.uid);
+    }
+    match /pickedUsers/{docId} {
+      allow read: if signedIn();
+      allow write: if isAdmin();
+    }
+
+    // ------------------------------------------------------------------
+    // Guides + feed — community content; author/admin deletes.
+    // ------------------------------------------------------------------
+    match /guides/{docId} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update: if signedIn();
+      allow delete: if isAdmin() || (signedIn() && resource.data.userId == request.auth.uid);
+    }
+    match /feed/{docId} {
+      allow read, create: if signedIn();
+      allow update, delete: if isAdmin();
+    }
+  }
+}
