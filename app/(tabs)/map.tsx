@@ -1194,7 +1194,7 @@ export default function MapScreen() {
   const mapRef = useRef<any>(null);
   const [hintDismissed, setHintDismissed] = useState(false);
 
-  const { places, beenPlaceIds, fetchPlaces, fetchBeenPlaces, toggleBeen } = usePlacesStore();
+  const { places, beenPlaceIds, fetchBeenPlaces, toggleBeen } = usePlacesStore();
   const { activeFilters, activeBudgetFilters, activeStarFilters, selectedFriendId, friendPlaceIds, clearFriendFilter } = useMapStore();
   const { friends } = useFriendsStore();
   const { location, requestLocation } = useLocation();
@@ -1206,9 +1206,11 @@ export default function MapScreen() {
     : null;
 
   useEffect(() => {
-    fetchPlaces();
+    // The map needs EVERY pin, not just Explore's first page — drain the
+    // paginated cursor so all recommendations appear immediately.
+    usePlacesStore.getState().fetchAllPlaces();
     fetchBeenPlaces();
-  }, [fetchPlaces]);
+  }, []);
 
   // Filter places by active categories, budget tiers, star ratings, and friend from the map filter store
   const filteredPlaces = useMemo(() => {

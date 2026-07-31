@@ -62,6 +62,7 @@ interface PlacesState {
 interface PlacesActions {
   fetchPlaces: (force?: boolean) => Promise<void>;
   fetchMorePlaces: () => Promise<void>;
+  fetchAllPlaces: () => Promise<void>;
   fetchUserPlaces: (force?: boolean) => Promise<void>;
   fetchFriendsPicks: () => Promise<void>;
   fetchFriendsPlaces: (friendUids: string[]) => Promise<void>;
@@ -239,6 +240,19 @@ export const usePlacesStore = create<PlacesState & PlacesActions>((set, get) => 
     } catch (error) {
       console.error('Error fetching more places:', error);
       set({ isLoadingMore: false });
+    }
+  },
+
+  // Drain the cursor until every place is loaded. The Map needs the full
+  // pin set immediately — it can't wait for Explore's infinite scroll to
+  // page the collection in. Pages sequentially so dedupe stays correct.
+  fetchAllPlaces: async () => {
+    if (get().places.length === 0) await get().fetchPlaces();
+    // Safety bound: 100 pages = 3000 places, far beyond the community's size.
+    for (let i = 0; i < 100 && get().hasMorePlaces; i++) {
+      const before = get().places.length;
+      await get().fetchMorePlaces();
+      if (get().places.length === before) break; // no progress — stop
     }
   },
 
