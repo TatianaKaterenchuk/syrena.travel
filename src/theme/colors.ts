@@ -21,7 +21,7 @@ export const colors = {
   text: {
     primary: '#F0EDE6',       // Warm ivory white
     secondary: '#A0A4B0',     // Cool silver
-    tertiary: '#5C6178',      // Muted slate
+    tertiary: '#8A90A8',      // Muted slate — lightened to pass 4.5:1 on navy
     inverse: '#010954',
   },
 

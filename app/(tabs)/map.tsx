@@ -1269,9 +1269,6 @@ export default function MapScreen() {
         style={[styles.headerOverlay, { paddingTop: insets.top + 8 }]}
         pointerEvents="box-none"
       >
-        <Pressable style={styles.headerButton} onPress={() => router.back()}>
-          <Ionicons name="arrow-back" size={22} color={colors.text.primary} />
-        </Pressable>
         <Text style={styles.headerTitle}>Map</Text>
         <View style={styles.headerRight}>
           <Pressable
@@ -1425,14 +1422,14 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     fontFamily: fonts.serif.bold,
-    fontSize: 16,
-    color: colors.text.primary,
+    fontSize: 18,
+    color: colors.gold.primary,
     backgroundColor: colors.background.primary + 'DD',
     paddingHorizontal: 14,
     paddingVertical: 6,
     borderRadius: 16,
     overflow: 'hidden',
-    letterSpacing: 0.5,
+    letterSpacing: 4,
   },
   headerRight: {
     flexDirection: 'row',

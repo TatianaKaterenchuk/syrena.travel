@@ -340,7 +340,7 @@ export default function ExploreScreen() {
       <>
         <View style={styles.sectionHeader}>
           <View style={styles.featuredTitleRow}>
-            <Ionicons name="location" size={16} color={colors.gold.primary} />
+            <Text style={styles.sectionDiamond}>✦</Text>
             <Text style={styles.sectionTitle}>{section.city}</Text>
           </View>
           <Text style={styles.citySectionSub}>
@@ -391,7 +391,7 @@ export default function ExploreScreen() {
                 </View>
               ) : null}
               <View style={styles.bestOfContent}>
-                <Text style={styles.bestOfName} numberOfLines={1}>{item.name}</Text>
+                <Text style={styles.bestOfName} numberOfLines={2}>{item.name}</Text>
                 <Text style={styles.bestOfCategory} numberOfLines={1}>
                   {item.city}{item.country ? `, ${item.country}` : ''}
                 </Text>
@@ -440,19 +440,27 @@ export default function ExploreScreen() {
         <>
         {/* Header */}
         <View style={styles.header}>
-          <View>
-            <Text style={styles.brandText}>SYRENA VOYAGER</Text>
-            <Text style={styles.brandTagline}>The best of the best</Text>
+          <Text style={styles.brandText}>SYRENA VOYAGER</Text>
+          <View style={styles.headerRight}>
+            <Pressable
+              style={styles.aboutButton}
+              onPress={() => router.push({ pathname: '/(tabs)/friends', params: { tab: 'messages' } })}
+              hitSlop={8}
+              accessibilityLabel="Messages"
+              accessibilityRole="button"
+            >
+              <Ionicons name="chatbubbles-outline" size={22} color={colors.gold.primary} />
+            </Pressable>
+            <Pressable
+              style={styles.aboutButton}
+              onPress={() => setShowAbout(true)}
+              hitSlop={8}
+              accessibilityLabel="About Syrena Voyager"
+              accessibilityRole="button"
+            >
+              <Ionicons name="help-circle-outline" size={22} color={colors.gold.primary} />
+            </Pressable>
           </View>
-          <Pressable
-            style={styles.aboutButton}
-            onPress={() => setShowAbout(true)}
-            hitSlop={8}
-            accessibilityLabel="About Syrena Voyager"
-            accessibilityRole="button"
-          >
-            <Ionicons name="help-circle-outline" size={22} color={colors.gold.primary} />
-          </Pressable>
         </View>
 
         {/* Activation checklist — helps new members discover every feature */}
@@ -734,7 +742,7 @@ export default function ExploreScreen() {
               <>
                 <View style={styles.sectionHeader}>
                   <View style={styles.featuredTitleRow}>
-                    <Ionicons name="star" size={16} color={colors.gold.primary} />
+                    <Text style={styles.sectionDiamond}>✦</Text>
                     <Text style={styles.sectionTitle}>{featuredPerson.displayName}'s Favorites</Text>
                   </View>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
@@ -749,16 +757,11 @@ export default function ExploreScreen() {
                   </View>
                 </View>
                 {featuredPicks.length === 0 ? (
-                  <View style={styles.emptySection}>
-                    <View style={styles.emptyIconRingOuter}>
-                      <View style={styles.emptyIconCircle}>
-                        <Ionicons name="star-outline" size={26} color={colors.gold.muted} />
-                      </View>
-                    </View>
-                    <Text style={styles.emptyTitle}>No favorites yet</Text>
-                    <Text style={styles.emptySubtitle}>
+                  <View style={styles.emptyRow}>
+                    <Ionicons name="star-outline" size={16} color={colors.gold.muted} />
+                    <Text style={styles.emptyRowText}>
                       {canEditPicks
-                        ? 'Tap Edit to add your top favorites'
+                        ? 'No favorites yet — tap Edit to add your top picks'
                         : `${featuredPerson.displayName}'s favorites will appear here`}
                     </Text>
                   </View>
@@ -796,7 +799,7 @@ export default function ExploreScreen() {
                         </View>
                         <View style={styles.cardBrassLine} />
                         <View style={styles.placeCardContent}>
-                          <Text style={styles.placeName} numberOfLines={1}>
+                          <Text style={styles.placeName} numberOfLines={2}>
                             {item.name}
                           </Text>
                           <View
@@ -886,7 +889,7 @@ export default function ExploreScreen() {
                         )}
                         <View style={styles.cardBrassLine} />
                         <View style={styles.placeCardContent}>
-                          <Text style={styles.placeName} numberOfLines={1}>
+                          <Text style={styles.placeName} numberOfLines={2}>
                             {item.placeName}
                           </Text>
                           <View
@@ -932,7 +935,7 @@ export default function ExploreScreen() {
               <>
                 <View style={styles.sectionHeader}>
                   <View style={styles.featuredTitleRow}>
-                    <Ionicons name="ribbon" size={16} color={colors.gold.primary} />
+                    <Text style={styles.sectionDiamond}>✦</Text>
                     <Text style={styles.sectionTitle}>Best of {bestOfCity.city}</Text>
                   </View>
                 </View>
@@ -968,7 +971,7 @@ export default function ExploreScreen() {
                         </View>
                       ) : null}
                       <View style={styles.bestOfContent}>
-                        <Text style={styles.bestOfName} numberOfLines={1}>{item.name}</Text>
+                        <Text style={styles.bestOfName} numberOfLines={2}>{item.name}</Text>
                         <Text style={styles.bestOfCategory} numberOfLines={1}>
                           {item.city}{item.country ? `, ${item.country}` : ''}
                         </Text>
@@ -984,7 +987,7 @@ export default function ExploreScreen() {
               <>
                 <View style={styles.sectionHeader}>
                   <View style={styles.featuredTitleRow}>
-                    <Ionicons name="heart" size={16} color={colors.gold.primary} />
+                    <Text style={styles.sectionDiamond}>✦</Text>
                     <Text style={styles.sectionTitle}>Your Favorites</Text>
                   </View>
                 </View>
@@ -1023,7 +1026,7 @@ export default function ExploreScreen() {
                         </View>
                       </View>
                       <View style={styles.recentCardContent}>
-                        <Text style={styles.recentCardName} numberOfLines={1}>{item.name}</Text>
+                        <Text style={styles.recentCardName} numberOfLines={2}>{item.name}</Text>
                         <View style={styles.recentCardLocation}>
                           <Ionicons name="location-outline" size={10} color={colors.text.tertiary} />
                           <Text style={styles.recentCardLocationText} numberOfLines={1}>
@@ -1051,7 +1054,7 @@ export default function ExploreScreen() {
               <>
                 <View style={styles.sectionHeader}>
                   <View style={styles.featuredTitleRow}>
-                    <Ionicons name="time" size={16} color={colors.gold.primary} />
+                    <Text style={styles.sectionDiamond}>✦</Text>
                     <Text style={styles.sectionTitle}>Recently Added</Text>
                   </View>
                 </View>
@@ -1082,7 +1085,7 @@ export default function ExploreScreen() {
                         </View>
                       ) : null}
                       <View style={styles.bestOfContent}>
-                        <Text style={styles.bestOfName} numberOfLines={1}>{item.name}</Text>
+                        <Text style={styles.bestOfName} numberOfLines={2}>{item.name}</Text>
                         <Text style={styles.bestOfCategory} numberOfLines={1}>
                           {item.city}{item.country ? `, ${item.country}` : ''}
                         </Text>
@@ -1219,7 +1222,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: spacing.lg,
     paddingTop: spacing.lg,
-    paddingBottom: spacing.xl,
+    paddingBottom: spacing.md,
   },
   headerRight: {
     flexDirection: 'row',
@@ -1237,18 +1240,33 @@ const styles = StyleSheet.create({
   },
   brandText: {
     fontFamily: fonts.serif.bold,
-    fontSize: 24,
-    letterSpacing: 8,
+    fontSize: 20,
+    letterSpacing: 6,
     color: colors.gold.primary,
     flexShrink: 1,
   },
-  brandTagline: {
+  sectionDiamond: {
+    fontSize: 13,
+    color: colors.gold.primary,
+  },
+  emptyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.xl,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    backgroundColor: colors.ui.cardBg,
+    borderWidth: 1,
+    borderColor: colors.ui.border,
+  },
+  emptyRowText: {
+    flex: 1,
     fontFamily: fonts.sans.regular,
-    fontSize: 12,
-    color: colors.text.tertiary,
-    letterSpacing: 1,
-    marginTop: 2,
-    fontStyle: 'italic',
+    fontSize: 13,
+    color: colors.text.secondary,
   },
   avatarRing: {
     width: 40,

@@ -10,7 +10,12 @@ import { useFriendsStore } from '../../stores/useFriendsStore';
 import { useAuthStore } from '../../stores/useAuthStore';
 
 const DISMISS_KEY = 'syrena_checklist_dismissed';
+const FIRST_SEEN_KEY = 'syrena_checklist_first_seen';
 export const SHARED_CITY_KEY = 'syrena_has_shared_city';
+
+// After this many days the full card collapses into a one-line progress
+// pill so the first screen belongs to places, not onboarding chrome.
+const COMPACT_AFTER_DAYS = 3;
 
 interface ChecklistItem {
   key: string;
@@ -35,12 +40,20 @@ export default function ActivationChecklist() {
 
   const [dismissed, setDismissed] = useState(true); // hidden until storage read
   const [hasSharedCity, setHasSharedCity] = useState(false);
+  const [compact, setCompact] = useState(false);
+  const [expanded, setExpanded] = useState(false); // user tapped the compact pill
 
   useEffect(() => {
-    AsyncStorage.multiGet([DISMISS_KEY, SHARED_CITY_KEY]).then((pairs) => {
+    AsyncStorage.multiGet([DISMISS_KEY, SHARED_CITY_KEY, FIRST_SEEN_KEY]).then((pairs) => {
       const map = Object.fromEntries(pairs);
       setDismissed(map[DISMISS_KEY] === 'true');
       setHasSharedCity(map[SHARED_CITY_KEY] === 'true');
+      const firstSeen = Number(map[FIRST_SEEN_KEY]);
+      if (!firstSeen) {
+        AsyncStorage.setItem(FIRST_SEEN_KEY, String(Date.now()));
+      } else if (Date.now() - firstSeen > COMPACT_AFTER_DAYS * 24 * 60 * 60 * 1000) {
+        setCompact(true);
+      }
     });
   }, []);
 
@@ -109,6 +122,27 @@ export default function ActivationChecklist() {
     setDismissed(true);
     AsyncStorage.setItem(DISMISS_KEY, 'true');
   };
+
+  if (compact && !expanded) {
+    return (
+      <Pressable
+        style={({ pressed }) => [styles.pill, pressed && { opacity: 0.8 }]}
+        onPress={() => setExpanded(true)}
+        accessibilityRole="button"
+        accessibilityLabel={`Getting started: ${doneCount} of ${items.length} complete. Tap to expand.`}
+      >
+        <Text style={styles.pillText}>
+          Getting started · {doneCount} of {items.length}
+        </Text>
+        <View style={styles.pillTrack}>
+          <View
+            style={[styles.pillFill, { width: `${(doneCount / items.length) * 100}%` }]}
+          />
+        </View>
+        <Ionicons name="chevron-down" size={14} color={colors.gold.muted} />
+      </Pressable>
+    );
+  }
 
   return (
     <View style={styles.card}>
@@ -216,5 +250,35 @@ const styles = StyleSheet.create({
   rowLabelDone: {
     color: colors.text.tertiary,
     textDecorationLine: 'line-through',
+  },
+  pill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    marginHorizontal: spacing.lg,
+    marginBottom: spacing.md,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 10,
+    borderRadius: radius.lg,
+    backgroundColor: colors.ui.cardBg,
+    borderWidth: 1,
+    borderColor: colors.gold.primary + '25',
+  },
+  pillText: {
+    fontFamily: fonts.sans.medium,
+    fontSize: 12,
+    color: colors.text.secondary,
+  },
+  pillTrack: {
+    flex: 1,
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: colors.ui.border,
+    overflow: 'hidden',
+  },
+  pillFill: {
+    height: 3,
+    borderRadius: 1.5,
+    backgroundColor: colors.gold.primary,
   },
 });

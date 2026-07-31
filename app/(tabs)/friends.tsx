@@ -12,7 +12,7 @@ import {
   Share,
 } from 'react-native';
 import { Image } from 'expo-image';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Haptics from 'expo-haptics';
@@ -52,6 +52,13 @@ export default function FriendsScreen() {
   const adminPendingCount = useAdminNotificationStore((s) => s.totalPendingCount);
 
   const [activeTab, setActiveTab] = useState<TabKey>('friends');
+  // Deep-link support: /(tabs)/friends?tab=messages (used by the Explore header)
+  const { tab: tabParam } = useLocalSearchParams<{ tab?: string }>();
+  useEffect(() => {
+    if (tabParam === 'messages' || tabParam === 'requests' || tabParam === 'friends') {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam]);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<UserProfile[]>([]);
   const [isSearching, setIsSearching] = useState(false);
@@ -431,14 +438,18 @@ export default function FriendsScreen() {
       <Pressable
         style={styles.chatButton}
         onPress={() => handleOpenChat(item)}
-        hitSlop={8}
+        hitSlop={13}
+        accessibilityLabel={`Message ${item.displayName}`}
+        accessibilityRole="button"
       >
         <Ionicons name="chatbubble-outline" size={18} color={colors.gold.primary} />
       </Pressable>
       <Pressable
         style={styles.removeButton}
         onPress={() => handleRemoveFriend(item)}
-        hitSlop={8}
+        hitSlop={12}
+        accessibilityLabel={`Remove ${item.displayName} from friends`}
+        accessibilityRole="button"
       >
         <Ionicons name="close-circle-outline" size={20} color={colors.text.tertiary} />
       </Pressable>
