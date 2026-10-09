@@ -23,7 +23,9 @@
         "NSLocationWhenInUseUsageDescription": "Your current location is used to display your position on the Map tab and to sort recommended restaurants, bars, and hotels by distance when you tap Near Me on the Explore tab.",
         "NSPhotoLibraryUsageDescription": "Your photo library is accessed when you tap Choose Photo to set a profile picture or when you tap Add Photo while submitting a place recommendation.",
         "ITSAppUsesNonExemptEncryption": false,
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -80,9 +82,9 @@
       "googlePlacesApiKey": "AIzaSyBnYqu6JhN1NQVNkDXN_zhpmNoWy4lFAzo",
       "googleWebClientId": "511200626594-afcgvuv813j9onooe66l6oqc63j26avj.apps.googleusercontent.com",
       "eas": {
-        "projectId": "da66342d-567d-4d60-b19c-83206174c6fe"
+        "projectId": "a290ab67-d455-4284-be62-a34fdefdce7d"
       }
     },
-    "owner": "alegro"
+    "owner": "tatianakaterenchuk"
   }
 }
