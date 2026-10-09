@@ -12,7 +12,7 @@ import { Image } from 'expo-image';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect } from 'expo-router';
 import { colors, fonts, spacing, radius, shadows } from '../../src/theme';
 import { usePlacesStore, useListsStore, useAuthStore } from '../../src/stores';
 

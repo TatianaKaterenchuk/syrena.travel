@@ -75,7 +75,10 @@
           "icon": "./assets/icon.png",
           "color": "#C4A265"
         }
-      ]
+      ],
+      "expo-image",
+      "expo-splash-screen",
+      "expo-status-bar"
     ],
     "extra": {
       "router": {},
